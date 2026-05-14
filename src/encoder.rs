@@ -13,9 +13,10 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
+use audioadapter_buffers::direct::InterleavedSlice;
 use mp3lame_encoder::{Bitrate, Builder, FlushNoGap, MonoPcm, Quality};
-use rubato::{Fft, FixedSync, Resampler};
 use rtrb::Consumer;
+use rubato::{Fft, FixedSync, Resampler};
 
 use crate::audio::AudioState;
 
@@ -119,7 +120,7 @@ fn run_encoder(
     // Working buffers -------------------------------------------------------
     let mut interleaved: Vec<f32> = Vec::with_capacity(in_channels * RESAMPLER_CHUNK_IN * 4);
     let mut mono_pending: Vec<f32> = Vec::with_capacity(RESAMPLER_CHUNK_IN * 4);
-    let mut resample_in: Vec<Vec<f32>> = vec![Vec::with_capacity(RESAMPLER_CHUNK_IN)];
+    let mut mono_chunk: Vec<f32> = Vec::with_capacity(RESAMPLER_CHUNK_IN);
 
     loop {
         // Drain whatever is available from the ring buffer.
@@ -150,15 +151,11 @@ fn run_encoder(
 
         // Resample + encode complete chunks.
         while mono_pending.len() >= RESAMPLER_CHUNK_IN {
-            resample_in[0].clear();
-            resample_in[0].extend_from_slice(&mono_pending[..RESAMPLER_CHUNK_IN]);
+            mono_chunk.clear();
+            mono_chunk.extend_from_slice(&mono_pending[..RESAMPLER_CHUNK_IN]);
             mono_pending.drain(..RESAMPLER_CHUNK_IN);
-
-            let out = resampler
-                .process(&resample_in, None)
-                .map_err(|e| anyhow!("rubato process: {e}"))?;
-            let resampled = &out[0];
-            encode_and_write(&mut encoder, resampled, &mut writer)?;
+            let resampled = resample_mono(&mut *resampler, &mono_chunk)?;
+            encode_and_write(&mut encoder, &resampled, &mut writer)?;
         }
 
         // Stop condition: capture has stopped AND the consumer is empty AND
@@ -175,17 +172,9 @@ fn run_encoder(
 
     // Flush remaining sub-chunk pending samples by zero-padding to a chunk.
     if !mono_pending.is_empty() {
-        let padded = {
-            let mut v = std::mem::take(&mut mono_pending);
-            v.resize(RESAMPLER_CHUNK_IN, 0.0);
-            v
-        };
-        resample_in[0].clear();
-        resample_in[0].extend_from_slice(&padded);
-        let out = resampler
-            .process(&resample_in, None)
-            .map_err(|e| anyhow!("rubato final process: {e}"))?;
-        encode_and_write(&mut encoder, &out[0], &mut writer)?;
+        mono_pending.resize(RESAMPLER_CHUNK_IN, 0.0);
+        let resampled = resample_mono(&mut *resampler, &mono_pending)?;
+        encode_and_write(&mut encoder, &resampled, &mut writer)?;
     }
 
     // LAME flush — writes the final MP3 frames and the LAME tag.
@@ -206,6 +195,18 @@ fn run_encoder(
     file.sync_all()?;
 
     Ok(())
+}
+
+fn resample_mono(
+    resampler: &mut dyn Resampler<f32>,
+    samples: &[f32],
+) -> Result<Vec<f32>> {
+    let input = InterleavedSlice::new(samples, 1, samples.len())
+        .map_err(|e| anyhow!("rubato input adapter: {e:?}"))?;
+    let output = resampler
+        .process(&input, 0, None)
+        .map_err(|e| anyhow!("rubato process: {e}"))?;
+    Ok(output.take_data())
 }
 
 fn encode_and_write(

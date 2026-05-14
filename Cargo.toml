@@ -7,23 +7,27 @@ authors = ["Geoffroy"]
 license = "MIT"
 
 [dependencies]
-dioxus = { version = "*", features = ["desktop"] }
-dioxus-desktop = "*"
-cpal = "*"
-rubato = "*"
-mp3lame-encoder = "*"
-rfd = "*"
-directories = "*"
-chrono = "*"
-rtrb = "*"
-image = "*"
-serde = { version = "*", features = ["derive"] }
-toml = "*"
-anyhow = "*"
-log = "*"
-env_logger = "*"
-parking_lot = "*"
-futures-timer = "*"
+# Versions pinned exactly to the latest stable at the time of pinning
+# (look up with `cargo search <name>` or https://crates.io/api/v1/crates/<name>).
+# Use `=X.Y.Z` strictly — no auto patch bumps — to keep CI reproducible.
+dioxus = { version = "=0.7.9", features = ["desktop"] }
+dioxus-desktop = "=0.7.9"
+cpal = "=0.17.3"
+rubato = "=2.0.0"
+audioadapter-buffers = "=3.0.0"
+mp3lame-encoder = "=0.2.4"
+rfd = "=0.17.2"
+directories = "=6.0.0"
+chrono = "=0.4.44"
+rtrb = "=0.3.4"
+image = "=0.25.10"
+serde = { version = "=1.0.228", features = ["derive"] }
+toml = "=1.1.2"
+anyhow = "=1.0.102"
+log = "=0.4.29"
+env_logger = "=0.11.10"
+parking_lot = "=0.12.5"
+futures-timer = "=3.0.3"
 
 [profile.release]
 opt-level = 3

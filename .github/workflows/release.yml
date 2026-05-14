@@ -89,9 +89,6 @@ jobs:
         with:
           shared-key: ${{ matrix.os }}
 
-      - name: cargo update (bump to latest)
-        run: mise exec -- cargo update
-
       # ---- macOS: build both architectures and lipo to universal2 ----
       - name: Build mac x86_64
         if: matrix.os == 'macos-latest'
