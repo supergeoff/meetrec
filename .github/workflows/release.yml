@@ -20,30 +20,42 @@ permissions:
   contents: write
 
 jobs:
+  matrix:
+    name: compute-matrix
+    runs-on: ubuntu-latest
+    outputs:
+      include: ${{ steps.set.outputs.include }}
+    steps:
+      - id: set
+        shell: bash
+        run: |
+          # `push` event (tag) → full matrix. Dispatch → honour os_filter input.
+          filter="${{ github.event.inputs.os_filter }}"
+          if [[ "${{ github.event_name }}" == "push" ]]; then filter="all"; fi
+          if [[ -z "$filter" ]]; then filter="all"; fi
+
+          mac='{"os":"macos-latest","target_pretty":"macos-universal","artifact":"meetrec-macos-universal.tar.gz"}'
+          win='{"os":"windows-latest","target_pretty":"windows-x86_64","artifact":"meetrec-windows-x86_64.msi"}'
+          lin='{"os":"ubuntu-latest","target_pretty":"linux-x86_64","artifact":"meetrec-linux-x86_64.AppImage"}'
+
+          case "$filter" in
+            all)          inc="[$mac,$win,$lin]" ;;
+            windows-only) inc="[$win]" ;;
+            macos-only)   inc="[$mac]" ;;
+            linux-only)   inc="[$lin]" ;;
+            *)            echo "Unknown filter: $filter" >&2; exit 1 ;;
+          esac
+          echo "Filter: $filter"
+          echo "Matrix: $inc"
+          echo "include=$inc" >> "$GITHUB_OUTPUT"
+
   build:
     name: build-${{ matrix.os }}
-    if: >-
-      github.event_name == 'push' ||
-      github.event.inputs.os_filter == 'all' ||
-      (github.event.inputs.os_filter == 'windows-only' && matrix.os == 'windows-latest') ||
-      (github.event.inputs.os_filter == 'macos-only'   && matrix.os == 'macos-latest') ||
-      (github.event.inputs.os_filter == 'linux-only'   && matrix.os == 'ubuntu-latest')
+    needs: matrix
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: macos-latest
-            target_pretty: macos-universal
-            bundle_glob: "target/release/bundle/osx/*.app"
-            artifact: meetrec-macos-universal.tar.gz
-          - os: windows-latest
-            target_pretty: windows-x86_64
-            bundle_glob: "target/release/bundle/msi/*.msi"
-            artifact: meetrec-windows-x86_64.msi
-          - os: ubuntu-latest
-            target_pretty: linux-x86_64
-            bundle_glob: "dist/*.AppImage"
-            artifact: meetrec-linux-x86_64.AppImage
+        include: ${{ fromJson(needs.matrix.outputs.include) }}
 
     runs-on: ${{ matrix.os }}
 
