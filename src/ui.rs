@@ -7,7 +7,7 @@ use chrono::Local;
 use dioxus::prelude::*;
 
 use crate::audio::AudioController;
-use crate::config::Config;
+use crate::config::{Config, SummaryConfig, TranscriptionConfig};
 use crate::devices::{list_input_devices, SYSTEM_DEFAULT_ID};
 
 const STYLE: &str = r#"
@@ -207,13 +207,19 @@ html, body {
 .browse:hover { background: var(--ink-05); }
 .browse:active { transform: scale(0.97); }
 
+.footer-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+.footer-left { flex: 1; min-width: 0; }
+
 .footer {
-    margin-top: 2px;
     font-family: var(--font-mono);
     font-size: 10px;
     color: var(--fg-faint);
     letter-spacing: 0.04em;
-    text-align: center;
 }
 
 .error {
@@ -224,6 +230,159 @@ html, body {
     font-size: 11px;
     line-height: 1.4;
 }
+
+/* ── gear button ── */
+.settings-btn {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    color: var(--fg-faint);
+    font-size: 15px;
+    line-height: 1;
+    padding: 4px 6px;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    transition: color var(--dur-fast) var(--ease-out),
+                background var(--dur-fast) var(--ease-out);
+}
+.settings-btn:hover { color: var(--ink); background: var(--ink-05); }
+
+/* ── settings modal ── */
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.45);
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.modal {
+    background: var(--paper);
+    border-radius: var(--r-md);
+    width: 520px;
+    max-height: 82vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    overflow: hidden;
+}
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px 10px;
+    border-bottom: 1px solid var(--hairline);
+    flex-shrink: 0;
+}
+.modal-title { font-size: 13px; font-weight: 600; }
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 14px;
+    color: var(--fg-muted);
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: var(--r-sm);
+    line-height: 1;
+}
+.modal-close:hover { background: var(--ink-05); color: var(--ink); }
+.modal-tabs {
+    display: flex;
+    padding: 0 18px;
+    border-bottom: 1px solid var(--hairline);
+    flex-shrink: 0;
+}
+.modal-tab {
+    padding: 8px 14px;
+    font-size: 12px;
+    font-family: var(--font-sans);
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    color: var(--fg-muted);
+    transition: color var(--dur-fast) var(--ease-out);
+}
+.modal-tab.active { border-bottom-color: var(--ink); color: var(--ink); font-weight: 500; }
+.modal-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.form-row { display: flex; flex-direction: column; gap: 3px; }
+.form-label { font-size: 11px; color: var(--fg-muted); font-weight: 500; }
+.form-input {
+    background: var(--paper);
+    color: var(--ink);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-sm);
+    padding: 6px 10px;
+    font-family: var(--font-sans);
+    font-size: 12px;
+    outline: none;
+    width: 100%;
+    transition: border-color var(--dur-fast) var(--ease-out);
+}
+.form-input:focus { border-color: var(--ink); }
+.form-input:disabled { opacity: 0.45; cursor: default; }
+.form-textarea {
+    resize: vertical;
+    min-height: 90px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.5;
+}
+.form-hint { font-size: 10px; color: var(--fg-faint); font-family: var(--font-mono); }
+.form-check-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    cursor: pointer;
+    user-select: none;
+    color: var(--fg);
+}
+.form-check-row input[type="checkbox"] { cursor: pointer; }
+.modal-warning {
+    font-size: 10px;
+    color: var(--fg-muted);
+    background: var(--ink-05);
+    border-radius: var(--r-sm);
+    padding: 7px 10px;
+    margin-top: 2px;
+}
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 10px 18px;
+    border-top: 1px solid var(--hairline);
+    flex-shrink: 0;
+}
+.btn {
+    border: none;
+    border-radius: var(--r-pill);
+    padding: 7px 18px;
+    font-family: var(--font-sans);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: opacity var(--dur-fast) var(--ease-out),
+                background var(--dur-fast) var(--ease-out);
+}
+.btn-ghost {
+    background: var(--paper);
+    color: var(--ink);
+    box-shadow: inset 0 0 0 1px var(--hairline);
+}
+.btn-ghost:hover { background: var(--ink-05); }
+.btn-primary { background: var(--ink); color: var(--paper); }
+.btn-primary:hover { opacity: 0.85; }
+.modal-err { font-size: 11px; color: #c00; }
 "#;
 
 #[component]
@@ -251,6 +410,33 @@ pub fn App() -> Element {
     let mut peak_db = use_signal(|| f32::NEG_INFINITY);
     let mut error = use_signal::<Option<String>>(|| None);
 
+    // Extended config sections — only updated via the settings modal Save button.
+    let mut saved_transcription = use_signal(|| initial.transcription.clone());
+    let mut saved_summary = use_signal(|| initial.summary.clone());
+    let mut saved_ui_cfg = use_signal(|| initial.ui.clone());
+
+    // Session-frozen copy of TranscriptionConfig set at record start and cleared at stop.
+    // The transcription worker (next commit) reads from this snapshot, not from live signals.
+    let mut session_transcription = use_signal::<Option<TranscriptionConfig>>(|| None);
+
+    // Modal visibility and active tab (0 = Transcription, 1 = Résumé)
+    let mut show_settings = use_signal(|| false);
+    let mut settings_tab = use_signal(|| 0u8);
+    let mut modal_error = use_signal::<Option<String>>(|| None);
+
+    // Draft signals — initialized from saved values when the modal opens.
+    let mut d_t_enabled = use_signal(|| initial.transcription.enabled);
+    let mut d_t_base_url = use_signal(|| initial.transcription.base_url.clone());
+    let mut d_t_api_key = use_signal(|| initial.transcription.api_key.clone());
+    let mut d_t_model = use_signal(|| initial.transcription.model.clone());
+    let mut d_t_chunk = use_signal(|| initial.transcription.chunk_seconds.to_string());
+    let mut d_t_lang = use_signal(|| initial.transcription.language.clone().unwrap_or_default());
+    let mut d_s_base_url = use_signal(|| initial.summary.base_url.clone());
+    let mut d_s_api_key = use_signal(|| initial.summary.api_key.clone());
+    let mut d_s_model = use_signal(|| initial.summary.model.clone());
+    let mut d_s_prompt = use_signal(|| initial.summary.prompt_template.clone());
+    let mut d_same_key = use_signal(|| false);
+
     // ── poll the audio thread state at ~30 Hz ───────────────────────────
     {
         let controller = Arc::clone(&controller);
@@ -271,11 +457,14 @@ pub fn App() -> Element {
         });
     }
 
-    // ── persist config when folder or device changes ────────────────────
+    // ── persist config when any saved field changes ──────────────────────
     use_effect(move || {
         let cfg = Config {
             output_folder: Some(output_folder.read().clone()),
             input_device: Some(selected_device.read().clone()),
+            transcription: saved_transcription.read().clone(),
+            summary: saved_summary.read().clone(),
+            ui: saved_ui_cfg.read().clone(),
         };
         if let Err(e) = cfg.save() {
             log::warn!("config save failed: {e:#}");
@@ -299,6 +488,9 @@ pub fn App() -> Element {
     } else {
         0.0
     };
+
+    let tab = *settings_tab.read();
+    let same_key = *d_same_key.read();
 
     // ── handlers ────────────────────────────────────────────────────────
     let on_browse = move |_| {
@@ -331,6 +523,21 @@ pub fn App() -> Element {
                 )));
                 return;
             }
+            // Validate transcription settings before starting
+            let transcription = saved_transcription.read().clone();
+            if transcription.enabled
+                && (transcription.base_url.trim().is_empty()
+                    || transcription.api_key.trim().is_empty())
+            {
+                error.set(Some(
+                    "Transcription activée : URL de base ou clé API manquante. Vérifiez ⚙."
+                        .to_string(),
+                ));
+                return;
+            }
+            // Freeze config for this session — the transcription worker reads this snapshot.
+            session_transcription.set(Some(transcription));
+
             let stamp = Local::now().format("%Y%m%d_%H%M%S").to_string();
             let path = folder.join(format!("meeting_{}.mp3", stamp));
             let device = selected_device.read().clone();
@@ -348,7 +555,71 @@ pub fn App() -> Element {
     };
     let stop_recording = {
         let controller = Arc::clone(&controller);
-        move |_| controller.stop()
+        move |_| {
+            controller.stop();
+            session_transcription.set(None);
+        }
+    };
+
+    // ── settings modal handlers ──────────────────────────────────────────
+    let open_settings = move |_| {
+        let t = saved_transcription.read().clone();
+        let s = saved_summary.read().clone();
+        d_t_enabled.set(t.enabled);
+        d_t_base_url.set(t.base_url);
+        d_t_api_key.set(t.api_key.clone());
+        d_t_model.set(t.model);
+        d_t_chunk.set(t.chunk_seconds.to_string());
+        d_t_lang.set(t.language.unwrap_or_default());
+        d_s_base_url.set(s.base_url);
+        d_s_api_key.set(s.api_key);
+        d_s_model.set(s.model);
+        d_s_prompt.set(s.prompt_template);
+        d_same_key.set(false);
+        modal_error.set(None);
+        settings_tab.set(0);
+        show_settings.set(true);
+    };
+
+    let save_settings = move |_| {
+        let enabled = *d_t_enabled.read();
+        let t_url = d_t_base_url.read().clone();
+        let t_key = d_t_api_key.read().clone();
+
+        if enabled && (t_url.trim().is_empty() || t_key.trim().is_empty()) {
+            modal_error.set(Some(
+                "Transcription activée : URL de base et clé API sont requises.".to_string(),
+            ));
+            return;
+        }
+
+        let s_key = if *d_same_key.read() {
+            t_key.clone()
+        } else {
+            d_s_api_key.read().clone()
+        };
+        let chunk: u32 = d_t_chunk.read().parse().unwrap_or(8);
+        let lang = d_t_lang.read().clone();
+
+        saved_transcription.set(TranscriptionConfig {
+            enabled,
+            base_url: t_url,
+            api_key: t_key,
+            model: d_t_model.read().clone(),
+            chunk_seconds: chunk,
+            language: if lang.trim().is_empty() {
+                None
+            } else {
+                Some(lang)
+            },
+        });
+        saved_summary.set(SummaryConfig {
+            base_url: d_s_base_url.read().clone(),
+            api_key: s_key,
+            model: d_s_model.read().clone(),
+            prompt_template: d_s_prompt.read().clone(),
+        });
+        show_settings.set(false);
     };
 
     rsx! {
@@ -442,10 +713,204 @@ pub fn App() -> Element {
                     }
                 }
 
-                if let Some(msg) = error.read().clone() {
-                    div { class: "error", "{msg}" }
-                } else {
-                    div { class: "footer", "mono · 32 kbps · 16 kHz" }
+                div { class: "footer-row",
+                    div { class: "footer-left",
+                        if let Some(msg) = error.read().clone() {
+                            div { class: "error", "{msg}" }
+                        } else {
+                            div { class: "footer", "mono · 32 kbps · 16 kHz" }
+                        }
+                    }
+                    button {
+                        class: "settings-btn",
+                        title: "Paramètres",
+                        onclick: open_settings,
+                        "⚙"
+                    }
+                }
+            }
+        }
+
+        // ── settings modal ────────────────────────────────────────
+        if *show_settings.read() {
+            div { class: "modal-backdrop",
+                div { class: "modal",
+
+                    div { class: "modal-header",
+                        span { class: "modal-title", "Paramètres" }
+                        button {
+                            class: "modal-close",
+                            onclick: move |_| { show_settings.set(false); },
+                            "✕"
+                        }
+                    }
+
+                    div { class: "modal-tabs",
+                        button {
+                            class: if tab == 0 { "modal-tab active" } else { "modal-tab" },
+                            onclick: move |_| { settings_tab.set(0); },
+                            "Transcription"
+                        }
+                        button {
+                            class: if tab == 1 { "modal-tab active" } else { "modal-tab" },
+                            onclick: move |_| { settings_tab.set(1); },
+                            "Résumé"
+                        }
+                    }
+
+                    div { class: "modal-body",
+                        if tab == 0 {
+                            label { class: "form-check-row",
+                                input {
+                                    r#type: "checkbox",
+                                    checked: *d_t_enabled.read(),
+                                    onclick: move |_| {
+                                        d_t_enabled.set(!*d_t_enabled.read());
+                                    },
+                                }
+                                "Activer la transcription live"
+                            }
+                            div { class: "form-row",
+                                span { class: "form-label", "URL de base" }
+                                input {
+                                    class: "form-input",
+                                    r#type: "text",
+                                    placeholder: "https://openrouter.ai/api/v1",
+                                    value: "{d_t_base_url}",
+                                    oninput: move |e| { d_t_base_url.set(e.value()); },
+                                }
+                            }
+                            div { class: "form-row",
+                                span { class: "form-label", "Clé API" }
+                                input {
+                                    class: "form-input",
+                                    r#type: "password",
+                                    placeholder: "sk-…",
+                                    value: "{d_t_api_key}",
+                                    oninput: move |e| {
+                                        let val = e.value();
+                                        d_t_api_key.set(val.clone());
+                                        if *d_same_key.read() {
+                                            d_s_api_key.set(val);
+                                        }
+                                    },
+                                }
+                            }
+                            div { class: "form-row",
+                                span { class: "form-label", "Modèle STT" }
+                                input {
+                                    class: "form-input",
+                                    r#type: "text",
+                                    placeholder: "openai/whisper-1",
+                                    value: "{d_t_model}",
+                                    oninput: move |e| { d_t_model.set(e.value()); },
+                                }
+                            }
+                            div { class: "form-row",
+                                span { class: "form-label", "Durée chunk (s)" }
+                                input {
+                                    class: "form-input",
+                                    r#type: "number",
+                                    min: "1",
+                                    max: "60",
+                                    value: "{d_t_chunk}",
+                                    oninput: move |e| { d_t_chunk.set(e.value()); },
+                                }
+                            }
+                            div { class: "form-row",
+                                span { class: "form-label", "Langue (optionnel)" }
+                                input {
+                                    class: "form-input",
+                                    r#type: "text",
+                                    placeholder: "fr, en, … (vide = auto)",
+                                    value: "{d_t_lang}",
+                                    oninput: move |e| { d_t_lang.set(e.value()); },
+                                }
+                            }
+                        } else {
+                            div { class: "form-row",
+                                span { class: "form-label", "URL de base" }
+                                input {
+                                    class: "form-input",
+                                    r#type: "text",
+                                    placeholder: "https://openrouter.ai/api/v1",
+                                    value: "{d_s_base_url}",
+                                    oninput: move |e| { d_s_base_url.set(e.value()); },
+                                }
+                            }
+                            label { class: "form-check-row",
+                                input {
+                                    r#type: "checkbox",
+                                    checked: same_key,
+                                    onclick: move |_| {
+                                        let new_val = !*d_same_key.read();
+                                        d_same_key.set(new_val);
+                                        if new_val {
+                                            d_s_api_key.set(d_t_api_key.read().clone());
+                                        }
+                                    },
+                                }
+                                "Utiliser la même clé API que pour la transcription"
+                            }
+                            div { class: "form-row",
+                                span { class: "form-label", "Clé API" }
+                                input {
+                                    class: "form-input",
+                                    r#type: "password",
+                                    placeholder: "sk-…",
+                                    value: "{d_s_api_key}",
+                                    disabled: same_key,
+                                    oninput: move |e| {
+                                        if !*d_same_key.read() {
+                                            d_s_api_key.set(e.value());
+                                        }
+                                    },
+                                }
+                            }
+                            div { class: "form-row",
+                                span { class: "form-label", "Modèle chat" }
+                                input {
+                                    class: "form-input",
+                                    r#type: "text",
+                                    placeholder: "openai/gpt-4o-mini",
+                                    value: "{d_s_model}",
+                                    oninput: move |e| { d_s_model.set(e.value()); },
+                                }
+                            }
+                            div { class: "form-row",
+                                span { class: "form-label", "Template prompt" }
+                                textarea {
+                                    class: "form-input form-textarea",
+                                    value: "{d_s_prompt}",
+                                    oninput: move |e| { d_s_prompt.set(e.value()); },
+                                }
+                                span { class: "form-hint",
+                                    "Jetons disponibles : {{transcript}}, {{participants}}"
+                                }
+                            }
+                        }
+
+                        div { class: "modal-warning",
+                            "⚠ Les clés sont stockées en clair dans config.toml"
+                        }
+
+                        if let Some(err) = modal_error.read().clone() {
+                            div { class: "modal-err", "{err}" }
+                        }
+                    }
+
+                    div { class: "modal-footer",
+                        button {
+                            class: "btn btn-ghost",
+                            onclick: move |_| { show_settings.set(false); },
+                            "Annuler"
+                        }
+                        button {
+                            class: "btn btn-primary",
+                            onclick: save_settings,
+                            "Enregistrer"
+                        }
+                    }
                 }
             }
         }
