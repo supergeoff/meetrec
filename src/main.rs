@@ -4,6 +4,7 @@ mod audio;
 mod config;
 mod devices;
 mod encoder;
+mod transcription;
 mod ui;
 
 use std::sync::Arc;
@@ -25,8 +26,8 @@ fn main() {
 
     let window = WindowBuilder::new()
         .with_title("meetrec")
-        .with_inner_size(LogicalSize::new(580.0, 240.0))
-        .with_min_inner_size(LogicalSize::new(500.0, 220.0))
+        .with_inner_size(LogicalSize::new(580.0, 420.0))
+        .with_min_inner_size(LogicalSize::new(500.0, 340.0))
         .with_resizable(true)
         .with_window_icon(icon);
 

@@ -17,8 +17,10 @@ use cpal::traits::{DeviceTrait, StreamTrait};
 use cpal::{SampleFormat, StreamConfig};
 use parking_lot::Mutex;
 
+use crate::config::TranscriptionConfig;
 use crate::devices;
-use crate::encoder::{spawn_encoder, EncoderHandle};
+use crate::encoder::{spawn_encoder, EncoderHandle, TranscriptionTee};
+use crate::transcription::{spawn_transcription_worker, TranscriptionHandle};
 
 /// Approx. 5 seconds of stereo 48 kHz f32 audio.
 const RING_CAPACITY: usize = 48_000 * 2 * 5;
@@ -27,6 +29,7 @@ pub enum AudioCommand {
     Start {
         device_id: String,
         output_path: PathBuf,
+        transcription: Option<TranscriptionConfig>,
     },
     Pause,
     Resume,
@@ -44,6 +47,13 @@ pub struct AudioState {
     pub elapsed_ms: AtomicU64,
     /// Last fatal error message (UI surfaces this).
     pub last_error: Mutex<Option<String>>,
+    /// Accumulated transcript text for the current session.
+    pub transcript: Mutex<String>,
+    /// Monotonically incremented each time a new chunk is appended; the UI
+    /// polls this to detect changes without holding the mutex.
+    pub transcript_version: AtomicU64,
+    /// True while the transcription worker is waiting for an HTTP response.
+    pub transcript_waiting: AtomicBool,
 }
 
 impl AudioState {
@@ -88,10 +98,16 @@ impl AudioController {
         Self { tx, state }
     }
 
-    pub fn start(&self, device_id: String, output_path: PathBuf) {
+    pub fn start(
+        &self,
+        device_id: String,
+        output_path: PathBuf,
+        transcription: Option<TranscriptionConfig>,
+    ) {
         let _ = self.tx.send(AudioCommand::Start {
             device_id,
             output_path,
+            transcription,
         });
     }
     pub fn pause(&self) {
@@ -108,6 +124,7 @@ impl AudioController {
 struct ActiveSession {
     stream: cpal::Stream,
     encoder: EncoderHandle,
+    transcription: Option<TranscriptionHandle>,
     paused_flag: Arc<AtomicBool>,
     timer_stop: Arc<AtomicBool>,
     timer_handle: Option<JoinHandle<()>>,
@@ -123,13 +140,18 @@ fn audio_thread(rx: Receiver<AudioCommand>, state: Arc<AudioState>) {
             AudioCommand::Start {
                 device_id,
                 output_path,
+                transcription,
             } => {
                 if session.is_some() {
                     continue;
                 }
                 accumulated_paused = std::time::Duration::ZERO;
                 pause_started_at = None;
-                match start_session(&device_id, output_path, Arc::clone(&state)) {
+                // Clear any transcript from a previous session.
+                *state.transcript.lock() = String::new();
+                state.transcript_version.store(0, Ordering::Release);
+                state.transcript_waiting.store(false, Ordering::Release);
+                match start_session(&device_id, output_path, transcription, Arc::clone(&state)) {
                     Ok(s) => {
                         state.recording.store(true, Ordering::Release);
                         state.paused.store(false, Ordering::Release);
@@ -168,10 +190,17 @@ fn audio_thread(rx: Receiver<AudioCommand>, state: Arc<AudioState>) {
                         let _ = h.join();
                     }
                     drop(s.stream);
+                    // Encoder finish flushes the tee and drops the Sender,
+                    // which closes the channel and lets the worker drain.
                     if let Err(e) = s.encoder.finish() {
                         log::error!("encoder finish failed: {e:#}");
                         state.record_error(format!("encode: {e:#}"));
                     }
+                    // Wait for the transcription worker to drain and exit.
+                    if let Some(t) = s.transcription {
+                        t.finish();
+                    }
+                    state.transcript_waiting.store(false, Ordering::Release);
                     state.recording.store(false, Ordering::Release);
                     state.paused.store(false, Ordering::Release);
                     state.peak_dbfs_x100.store(i32::MIN, Ordering::Release);
@@ -227,6 +256,7 @@ fn push_samples(samples: &[f32], state: &AudioState, producer: &mut rtrb::Produc
 fn start_session(
     device_id: &str,
     output_path: PathBuf,
+    transcription_cfg: Option<TranscriptionConfig>,
     state: Arc<AudioState>,
 ) -> Result<ActiveSession> {
     let device = devices::resolve_device(device_id)?;
@@ -266,12 +296,26 @@ fn start_session(
 
     stream.play()?;
 
+    // Build the optional transcription tee + worker.
+    let (tee, transcription_handle) =
+        if let Some(cfg) = transcription_cfg.filter(|c| c.enabled) {
+            let txt_path = output_path.with_extension("txt");
+            let (tx_chunks, rx_chunks) = std::sync::mpsc::channel::<String>();
+            let tee = TranscriptionTee::new(cfg.chunk_seconds, tx_chunks);
+            let handle =
+                spawn_transcription_worker(cfg, txt_path, rx_chunks, Arc::clone(&state))?;
+            (Some(tee), Some(handle))
+        } else {
+            (None, None)
+        };
+
     let encoder = spawn_encoder(
         consumer,
         channels,
         sample_rate,
         output_path,
         Arc::clone(&state),
+        tee,
     )?;
 
     let timer_stop = Arc::new(AtomicBool::new(false));
@@ -307,6 +351,7 @@ fn start_session(
     Ok(ActiveSession {
         stream,
         encoder,
+        transcription: transcription_handle,
         paused_flag,
         timer_stop,
         timer_handle: Some(timer_handle),

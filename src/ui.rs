@@ -49,12 +49,21 @@ html, body {
 }
 
 .app {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 16px 18px;
+    height: 100%;
+    min-height: 0;
+}
+
+/* ── top row: controls + settings ── */
+.app-top {
     display: grid;
     grid-template-columns: 220px 1fr;
     gap: 18px;
-    padding: 16px 18px;
-    height: 100%;
     align-items: stretch;
+    flex-shrink: 0;
 }
 
 /* ── left column: controls + timer + vumeter ── */
@@ -247,6 +256,63 @@ html, body {
 }
 .settings-btn:hover { color: var(--ink); background: var(--ink-05); }
 
+/* ── transcript panel ── */
+.transcript-panel {
+    flex: 1;
+    min-height: 100px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-md);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.transcript-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 7px 12px;
+    border-bottom: 1px solid var(--hairline);
+    flex-shrink: 0;
+}
+.transcript-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--fg-muted);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+.transcript-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px 12px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    word-break: break-word;
+    user-select: text;
+}
+.transcript-empty {
+    color: var(--fg-faint);
+    font-family: var(--font-sans);
+    font-style: italic;
+    font-size: 12px;
+}
+.transcript-waiting-dot {
+    display: inline-block;
+    width: 5px;
+    height: 5px;
+    border-radius: var(--r-circle);
+    background: var(--ink-25);
+    vertical-align: middle;
+    margin-left: 4px;
+    animation: t-pulse 1.2s ease-in-out infinite;
+}
+@keyframes t-pulse {
+    0%, 100% { opacity: 0.25; }
+    50%       { opacity: 1;    }
+}
+
 /* ── settings modal ── */
 .modal-backdrop {
     position: fixed;
@@ -410,13 +476,17 @@ pub fn App() -> Element {
     let mut peak_db = use_signal(|| f32::NEG_INFINITY);
     let mut error = use_signal::<Option<String>>(|| None);
 
+    // Transcript state polled from AudioState.
+    let mut transcript_text = use_signal(|| String::new());
+    let mut transcript_waiting = use_signal(|| false);
+    let mut transcript_version_seen = use_signal(|| 0u64);
+
     // Extended config sections — only updated via the settings modal Save button.
     let mut saved_transcription = use_signal(|| initial.transcription.clone());
     let mut saved_summary = use_signal(|| initial.summary.clone());
     let saved_ui_cfg = use_signal(|| initial.ui.clone());
 
     // Session-frozen copy of TranscriptionConfig set at record start and cleared at stop.
-    // The transcription worker (next commit) reads from this snapshot, not from live signals.
     let mut session_transcription = use_signal::<Option<TranscriptionConfig>>(|| None);
 
     // Modal visibility and active tab (0 = Transcription, 1 = Résumé)
@@ -449,6 +519,14 @@ pub fn App() -> Element {
                     paused.set(state.paused.load(Ordering::Acquire));
                     elapsed_ms.set(state.elapsed_ms.load(Ordering::Acquire));
                     peak_db.set(state.peak_dbfs());
+                    transcript_waiting.set(state.transcript_waiting.load(Ordering::Acquire));
+
+                    let ver = state.transcript_version.load(Ordering::Acquire);
+                    if ver != *transcript_version_seen.peek() {
+                        transcript_version_seen.set(ver);
+                        transcript_text.set(state.transcript.lock().clone());
+                    }
+
                     if let Some(msg) = state.take_error() {
                         error.set(Some(msg));
                     }
@@ -456,6 +534,15 @@ pub fn App() -> Element {
             }
         });
     }
+
+    // ── auto-scroll transcript to bottom when new text arrives ──────────
+    use_effect(move || {
+        let _ = transcript_version_seen.read();
+        let _ = document::eval(
+            "var e = document.getElementById('transcript-body');\
+             if (e) e.scrollTop = e.scrollHeight;",
+        );
+    });
 
     // ── persist config when any saved field changes ──────────────────────
     use_effect(move || {
@@ -491,6 +578,9 @@ pub fn App() -> Element {
 
     let tab = *settings_tab.read();
     let same_key = *d_same_key.read();
+    let transcription_enabled_in_cfg = saved_transcription.read().enabled;
+    let current_transcript = transcript_text.read().clone();
+    let waiting_for_chunk = *transcript_waiting.read();
 
     // ── handlers ────────────────────────────────────────────────────────
     let on_browse = move |_| {
@@ -523,7 +613,6 @@ pub fn App() -> Element {
                 )));
                 return;
             }
-            // Validate transcription settings before starting
             let transcription = saved_transcription.read().clone();
             if transcription.enabled
                 && (transcription.base_url.trim().is_empty()
@@ -535,13 +624,13 @@ pub fn App() -> Element {
                 ));
                 return;
             }
-            // Freeze config for this session — the transcription worker reads this snapshot.
-            session_transcription.set(Some(transcription));
+            session_transcription.set(Some(transcription.clone()));
 
             let stamp = Local::now().format("%Y%m%d_%H%M%S").to_string();
             let path = folder.join(format!("meeting_{}.mp3", stamp));
             let device = selected_device.read().clone();
-            controller.start(device, path);
+            let tc = if transcription.enabled { Some(transcription) } else { None };
+            controller.start(device, path, tc);
         }
     };
 
@@ -626,106 +715,135 @@ pub fn App() -> Element {
         style { {STYLE} }
         div { class: "app",
 
-            // ── left column: transport ────────────────────────────
-            div { class: "left",
-                div { class: "controls",
-                    if !recording_now {
-                        button {
-                            class: "ctl",
-                            title: "Record",
-                            onclick: start_recording,
-                            span { class: "circle" }
-                        }
-                    } else {
-                        if paused_now {
+            // ── top row: transport + settings ────────────────────────────
+            div { class: "app-top",
+
+                // ── left column: transport ────────────────────────────
+                div { class: "left",
+                    div { class: "controls",
+                        if !recording_now {
                             button {
                                 class: "ctl",
-                                title: "Resume",
-                                onclick: resume_recording,
-                                span { class: "tri" }
-                            }
-                        } else {
-                            button {
-                                class: "ctl rec",
-                                title: "Recording",
-                                disabled: true,
+                                title: "Record",
+                                onclick: start_recording,
                                 span { class: "circle" }
                             }
-                            button {
-                                class: "ctl",
-                                title: "Pause",
-                                onclick: pause_recording,
-                                span { class: "pause-bars",
-                                    span {}
-                                    span {}
+                        } else {
+                            if paused_now {
+                                button {
+                                    class: "ctl",
+                                    title: "Resume",
+                                    onclick: resume_recording,
+                                    span { class: "tri" }
+                                }
+                            } else {
+                                button {
+                                    class: "ctl rec",
+                                    title: "Recording",
+                                    disabled: true,
+                                    span { class: "circle" }
+                                }
+                                button {
+                                    class: "ctl",
+                                    title: "Pause",
+                                    onclick: pause_recording,
+                                    span { class: "pause-bars",
+                                        span {}
+                                        span {}
+                                    }
                                 }
                             }
+                            button {
+                                class: "ctl",
+                                title: "Stop",
+                                onclick: stop_recording,
+                                span { class: "square" }
+                            }
                         }
-                        button {
-                            class: "ctl",
-                            title: "Stop",
-                            onclick: stop_recording,
-                            span { class: "square" }
+                    }
+
+                    div { class: "timer", "{timer_text}" }
+
+                    div { class: "vumeter",
+                        div {
+                            class: "vu-bar",
+                            style: "width: {meter_pct}%;",
                         }
                     }
                 }
 
-                div { class: "timer", "{timer_text}" }
+                // ── right column: settings ────────────────────────────
+                div { class: "right",
+                    div { class: "row",
+                        label { "Output folder" }
+                        input {
+                            class: "input",
+                            r#type: "text",
+                            value: "{folder_str}",
+                            oninput: on_folder_input,
+                        }
+                        button {
+                            class: "browse",
+                            onclick: on_browse,
+                            "Browse…"
+                        }
+                    }
 
-                div { class: "vumeter",
-                    div {
-                        class: "vu-bar",
-                        style: "width: {meter_pct}%;",
+                    div { class: "row",
+                        label { "Input device" }
+                        select {
+                            class: "select",
+                            value: "{device_value}",
+                            onchange: on_device_change,
+                            for entry in devices.read().iter() {
+                                option {
+                                    value: "{entry.id}",
+                                    selected: entry.id == device_value,
+                                    "{entry.label}"
+                                }
+                            }
+                        }
+                    }
+
+                    div { class: "footer-row",
+                        div { class: "footer-left",
+                            if let Some(msg) = error.read().clone() {
+                                div { class: "error", "{msg}" }
+                            } else {
+                                div { class: "footer", "mono · 32 kbps · 16 kHz" }
+                            }
+                        }
+                        button {
+                            class: "settings-btn",
+                            title: "Paramètres",
+                            onclick: open_settings,
+                            "⚙"
+                        }
                     }
                 }
             }
 
-            // ── right column: settings ────────────────────────────
-            div { class: "right",
-                div { class: "row",
-                    label { "Output folder" }
-                    input {
-                        class: "input",
-                        r#type: "text",
-                        value: "{folder_str}",
-                        oninput: on_folder_input,
-                    }
-                    button {
-                        class: "browse",
-                        onclick: on_browse,
-                        "Browse…"
+            // ── transcript panel ──────────────────────────────────────
+            div { class: "transcript-panel",
+                div { class: "transcript-header",
+                    span { class: "transcript-title", "Transcription" }
+                    if waiting_for_chunk {
+                        span { class: "transcript-waiting-dot" }
                     }
                 }
-
-                div { class: "row",
-                    label { "Input device" }
-                    select {
-                        class: "select",
-                        value: "{device_value}",
-                        onchange: on_device_change,
-                        for entry in devices.read().iter() {
-                            option {
-                                value: "{entry.id}",
-                                selected: entry.id == device_value,
-                                "{entry.label}"
-                            }
+                div {
+                    id: "transcript-body",
+                    class: "transcript-body",
+                    if !transcription_enabled_in_cfg {
+                        span { class: "transcript-empty",
+                            "Transcription désactivée dans les paramètres"
                         }
-                    }
-                }
-
-                div { class: "footer-row",
-                    div { class: "footer-left",
-                        if let Some(msg) = error.read().clone() {
-                            div { class: "error", "{msg}" }
-                        } else {
-                            div { class: "footer", "mono · 32 kbps · 16 kHz" }
+                    } else if current_transcript.is_empty() {
+                        span { class: "transcript-empty",
+                            "En attente du premier chunk…"
                         }
-                    }
-                    button {
-                        class: "settings-btn",
-                        title: "Paramètres",
-                        onclick: open_settings,
-                        "⚙"
+                    } else {
+                        "{current_transcript}"
                     }
                 }
             }
@@ -791,7 +909,7 @@ pub fn App() -> Element {
                                     oninput: move |e| {
                                         let val = e.value();
                                         d_t_api_key.set(val.clone());
-                                        if *d_same_key.read() {
+                                        if *d_same_key.peek() {
                                             d_s_api_key.set(val);
                                         }
                                     },
@@ -844,10 +962,10 @@ pub fn App() -> Element {
                                     r#type: "checkbox",
                                     checked: same_key,
                                     onclick: move |_| {
-                                        let new_val = !*d_same_key.read();
+                                        let new_val = !*d_same_key.peek();
                                         d_same_key.set(new_val);
                                         if new_val {
-                                            d_s_api_key.set(d_t_api_key.read().clone());
+                                            d_s_api_key.set(d_t_api_key.peek().clone());
                                         }
                                     },
                                 }
@@ -862,7 +980,7 @@ pub fn App() -> Element {
                                     value: "{d_s_api_key}",
                                     disabled: same_key,
                                     oninput: move |e| {
-                                        if !*d_same_key.read() {
+                                        if !*d_same_key.peek() {
                                             d_s_api_key.set(e.value());
                                         }
                                     },
