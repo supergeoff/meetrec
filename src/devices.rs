@@ -19,18 +19,30 @@ pub struct DeviceEntry {
 }
 
 impl DeviceEntry {
-    pub fn system_default() -> Self {
+    pub fn system_default(suffix: Option<&str>) -> Self {
+        let label = match suffix {
+            Some(s) if !s.is_empty() => format!("{SYSTEM_DEFAULT_LABEL} — {s}"),
+            _ => SYSTEM_DEFAULT_LABEL.to_string(),
+        };
         Self {
             id: SYSTEM_DEFAULT_ID.to_string(),
-            label: SYSTEM_DEFAULT_LABEL.to_string(),
+            label,
         }
     }
 }
 
-/// Enumerate input devices. The first entry is always "System default".
+/// Enumerate input devices. The first entry is always "System default",
+/// suffixed with the *current* default device's display name so the user
+/// can tell what the system-default actually points at.
 pub fn list_input_devices() -> Vec<DeviceEntry> {
-    let mut out = vec![DeviceEntry::system_default()];
     let host = cpal::default_host();
+
+    let default_name = host
+        .default_input_device()
+        .and_then(|d| d.description().ok().map(|desc| desc.name().to_string()));
+
+    let mut out = vec![DeviceEntry::system_default(default_name.as_deref())];
+
     let Ok(devices) = host.input_devices() else {
         return out;
     };

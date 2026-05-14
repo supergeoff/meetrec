@@ -30,7 +30,9 @@ fn main() {
         .with_resizable(true)
         .with_window_icon(icon);
 
-    let desktop_cfg = DesktopConfig::new().with_window(window);
+    // `with_menu(None)` hides the wry/tao default app menu bar
+    // ("Window/Edit" on Windows) — we don't need it.
+    let desktop_cfg = DesktopConfig::new().with_window(window).with_menu(None);
 
     LaunchBuilder::desktop()
         .with_cfg(desktop_cfg)
