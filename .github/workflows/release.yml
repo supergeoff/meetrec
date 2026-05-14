@@ -84,17 +84,13 @@ jobs:
           install: true
           cache: true
 
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ matrix.os }}
+
       - name: cargo update (bump to latest)
         run: mise exec -- cargo update
-
-      - name: Generate icon (placeholder)
-        shell: bash
-        run: |
-          # If you committed a real assets/icon.png, this step is a no-op.
-          if [ ! -f assets/icon.png ]; then
-            echo "Missing assets/icon.png — build will fail."
-            exit 1
-          fi
 
       # ---- macOS: build both architectures and lipo to universal2 ----
       - name: Build mac x86_64
