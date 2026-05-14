@@ -413,7 +413,7 @@ pub fn App() -> Element {
     // Extended config sections — only updated via the settings modal Save button.
     let mut saved_transcription = use_signal(|| initial.transcription.clone());
     let mut saved_summary = use_signal(|| initial.summary.clone());
-    let mut saved_ui_cfg = use_signal(|| initial.ui.clone());
+    let saved_ui_cfg = use_signal(|| initial.ui.clone());
 
     // Session-frozen copy of TranscriptionConfig set at record start and cleared at stop.
     // The transcription worker (next commit) reads from this snapshot, not from live signals.
@@ -765,7 +765,8 @@ pub fn App() -> Element {
                                     r#type: "checkbox",
                                     checked: *d_t_enabled.read(),
                                     onclick: move |_| {
-                                        d_t_enabled.set(!*d_t_enabled.read());
+                                        let current = *d_t_enabled.read();
+                                        d_t_enabled.set(!current);
                                     },
                                 }
                                 "Activer la transcription live"
