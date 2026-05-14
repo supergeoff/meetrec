@@ -13,6 +13,7 @@ use dioxus::prelude::*;
 use dioxus_desktop::{tao::window::Icon, Config as DesktopConfig, LogicalSize, WindowBuilder};
 
 use crate::audio::AudioController;
+use crate::config::Config;
 use crate::ui::App;
 
 const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
@@ -24,10 +25,17 @@ fn main() {
 
     let icon = load_icon();
 
+    let initial_cfg = Config::load();
+    let initial_width: f64 = if initial_cfg.ui.transcription_panel_expanded {
+        860.0
+    } else {
+        580.0
+    };
+
     let window = WindowBuilder::new()
         .with_title("meetrec")
-        .with_inner_size(LogicalSize::new(580.0, 420.0))
-        .with_min_inner_size(LogicalSize::new(500.0, 340.0))
+        .with_inner_size(LogicalSize::new(initial_width, 240.0))
+        .with_min_inner_size(LogicalSize::new(500.0, 220.0))
         .with_resizable(true)
         .with_window_icon(icon);
 
