@@ -48,13 +48,17 @@ ffprobe -v error -show_streams meeting_*.mp3
 mise run bundle
 ```
 
-Produces:
+Produces portable bundles — no installer, just download and run:
 
-- macOS: `.app` (Mac, universal2 in CI)
-- Windows: `.msi` (built via WiX in CI)
-- Linux: **`.AppImage`** — single-file portable executable, runs on
-  Ubuntu / Arch / Fedora / Debian / openSUSE etc. with no system packages
-  required. webkit2gtk-4.1, GTK 3 and libasound are bundled inside.
+- **macOS**: `meetrec.app` (universal2, x86_64 + aarch64). The `.app`
+  bundle is required for the microphone permission prompt
+  (`NSMicrophoneUsageDescription` lives in `Info.plist`).
+- **Windows**: `meetrec.exe` — single portable executable. Depends on
+  the WebView2 runtime (preinstalled on Win11 and recent Win10).
+- **Linux**: `meetrec.AppImage` — single-file portable, runs on
+  Ubuntu / Arch / Fedora / Debian / openSUSE etc. with no system
+  packages required. webkit2gtk-4.1, GTK 3 and libasound are bundled
+  inside.
 
 To launch the Linux build:
 

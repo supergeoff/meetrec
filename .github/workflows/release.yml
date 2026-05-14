@@ -35,7 +35,7 @@ jobs:
           if [[ -z "$filter" ]]; then filter="all"; fi
 
           mac='{"os":"macos-latest","target_pretty":"macos-universal","artifact":"meetrec-macos-universal.tar.gz"}'
-          win='{"os":"windows-latest","target_pretty":"windows-x86_64","artifact":"meetrec-windows-x86_64.msi"}'
+          win='{"os":"windows-latest","target_pretty":"windows-x86_64","artifact":"meetrec-windows-x86_64.exe"}'
           lin='{"os":"ubuntu-latest","target_pretty":"linux-x86_64","artifact":"meetrec-linux-x86_64.AppImage"}'
 
           case "$filter" in
@@ -118,14 +118,10 @@ jobs:
         if: matrix.os == 'macos-latest'
         run: mise exec -- cargo bundle --release
 
-      # ---- Windows: standard build, then bundle MSI via cargo-bundle ----
-      - name: Build & bundle (windows)
+      # ---- Windows: portable EXE, no installer ----
+      - name: Build (windows)
         if: matrix.os == 'windows-latest'
-        shell: bash
-        run: |
-          mise exec -- cargo build --release
-          # cargo-bundle for windows produces an .msi (requires WiX in PATH).
-          mise exec -- cargo bundle --release || true
+        run: mise exec -- cargo build --release
 
       # ---- Linux: build binary, then pack as universal AppImage ----
       - name: Build (linux)
@@ -191,13 +187,7 @@ jobs:
               tar -czf "dist/${{ matrix.artifact }}" -C "$(dirname "$app")" "$(basename "$app")"
               ;;
             windows-latest)
-              msi=$(ls target/release/bundle/msi/*.msi 2>/dev/null | head -n1 || true)
-              if [ -z "$msi" ]; then
-                # fall back to zipping the bare binary if WiX wasn't available
-                7z a "dist/meetrec-windows-x86_64.zip" target/release/meetrec.exe
-              else
-                cp "$msi" "dist/${{ matrix.artifact }}"
-              fi
+              cp target/release/meetrec.exe "dist/${{ matrix.artifact }}"
               ;;
             ubuntu-latest)
               # AppImage is already in dist/ from the previous step.
