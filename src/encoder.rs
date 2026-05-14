@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use mp3lame_encoder::{Bitrate, Builder, FlushNoGap, MonoPcm, Quality};
-use rubato::{FastFixedIn, PolynomialDegree, Resampler};
+use rubato::{Fft, FixedSync, Resampler};
 use rtrb::Consumer;
 
 use crate::audio::AudioState;
@@ -101,15 +101,17 @@ fn run_encoder(
         .map_err(|e| anyhow!("lame build: {e:?}"))?;
 
     // Resampler -------------------------------------------------------------
-    // rubato's FastFixedIn takes fixed-size *input* chunks of mono f32 and
-    // uses polynomial interpolation — plenty for 32 kbps voice.
+    // rubato 1.0+ unified the old Fft/FastFixedIn types. We use the
+    // synchronous FFT resampler with a fixed input chunk size — well-suited
+    // for the fixed-ratio downsample (48 kHz/44.1 kHz → 16 kHz).
     let mut resampler: Box<dyn Resampler<f32> + Send> = Box::new(
-        FastFixedIn::<f32>::new(
-            TARGET_RATE as f64 / in_sample_rate as f64,
-            1.0,
-            PolynomialDegree::Septic,
+        Fft::<f32>::new(
+            in_sample_rate as usize,
+            TARGET_RATE,
             RESAMPLER_CHUNK_IN,
+            2,
             1,
+            FixedSync::Input,
         )
         .map_err(|e| anyhow!("rubato init: {e}"))?,
     );
