@@ -1,0 +1,10 @@
+/target
+/dist
+/.claude/
+**/*.rs.bk
+Cargo.lock
+.DS_Store
+*.mp3
+.idea/
+.vscode/
+*.swp

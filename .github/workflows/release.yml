@@ -1,0 +1,223 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      os_filter:
+        description: "Which OS to build"
+        type: choice
+        default: windows-only
+        options:
+          - all
+          - windows-only
+          - macos-only
+          - linux-only
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build-${{ matrix.os }}
+    if: >-
+      github.event_name == 'push' ||
+      github.event.inputs.os_filter == 'all' ||
+      (github.event.inputs.os_filter == 'windows-only' && matrix.os == 'windows-latest') ||
+      (github.event.inputs.os_filter == 'macos-only'   && matrix.os == 'macos-latest') ||
+      (github.event.inputs.os_filter == 'linux-only'   && matrix.os == 'ubuntu-latest')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target_pretty: macos-universal
+            bundle_glob: "target/release/bundle/osx/*.app"
+            artifact: meetrec-macos-universal.tar.gz
+          - os: windows-latest
+            target_pretty: windows-x86_64
+            bundle_glob: "target/release/bundle/msi/*.msi"
+            artifact: meetrec-windows-x86_64.msi
+          - os: ubuntu-latest
+            target_pretty: linux-x86_64
+            bundle_glob: "dist/*.AppImage"
+            artifact: meetrec-linux-x86_64.AppImage
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build deps
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            libasound2-dev \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libxdo-dev \
+            pkg-config \
+            build-essential \
+            file \
+            fuse \
+            libfuse2 \
+            wget
+
+      - name: Install mise
+        uses: jdx/mise-action@v2
+        with:
+          install: true
+          cache: true
+
+      - name: cargo update (bump to latest)
+        run: mise exec -- cargo update
+
+      - name: Generate icon (placeholder)
+        shell: bash
+        run: |
+          # If you committed a real assets/icon.png, this step is a no-op.
+          if [ ! -f assets/icon.png ]; then
+            echo "Missing assets/icon.png — build will fail."
+            exit 1
+          fi
+
+      # ---- macOS: build both architectures and lipo to universal2 ----
+      - name: Build mac x86_64
+        if: matrix.os == 'macos-latest'
+        run: |
+          mise exec -- rustup target add x86_64-apple-darwin
+          mise exec -- cargo build --release --target x86_64-apple-darwin
+
+      - name: Build mac aarch64
+        if: matrix.os == 'macos-latest'
+        run: |
+          mise exec -- rustup target add aarch64-apple-darwin
+          mise exec -- cargo build --release --target aarch64-apple-darwin
+
+      - name: Lipo universal binary
+        if: matrix.os == 'macos-latest'
+        run: |
+          mkdir -p target/release
+          lipo -create -output target/release/meetrec \
+            target/x86_64-apple-darwin/release/meetrec \
+            target/aarch64-apple-darwin/release/meetrec
+          chmod +x target/release/meetrec
+
+      - name: cargo-bundle (mac)
+        if: matrix.os == 'macos-latest'
+        run: mise exec -- cargo bundle --release
+
+      # ---- Windows: standard build, then bundle MSI via cargo-bundle ----
+      - name: Build & bundle (windows)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          mise exec -- cargo build --release
+          # cargo-bundle for windows produces an .msi (requires WiX in PATH).
+          mise exec -- cargo bundle --release || true
+
+      # ---- Linux: build binary, then pack as universal AppImage ----
+      - name: Build (linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: mise exec -- cargo build --release
+
+      - name: Stage AppDir (linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          set -e
+          rm -rf AppDir
+          mkdir -p AppDir/usr/bin
+          mkdir -p AppDir/usr/share/applications
+          mkdir -p AppDir/usr/share/icons/hicolor/512x512/apps
+          cp target/release/meetrec AppDir/usr/bin/meetrec
+          cp assets/icon.png AppDir/usr/share/icons/hicolor/512x512/apps/meetrec.png
+          cp assets/icon.png AppDir/meetrec.png
+          cat > AppDir/usr/share/applications/meetrec.desktop <<'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=meetrec
+          Comment=Mono MP3 32 kbps voice recorder
+          Exec=meetrec
+          Icon=meetrec
+          Categories=AudioVideo;Audio;Recorder;
+          Terminal=false
+          EOF
+          cp AppDir/usr/share/applications/meetrec.desktop AppDir/meetrec.desktop
+
+      - name: Build AppImage (linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          set -e
+          mkdir -p tools
+          cd tools
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-gtk/raw/master/linuxdeploy-plugin-gtk.sh
+          chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-gtk.sh
+          # Extract instead of mounting via FUSE — more reliable in CI.
+          ./linuxdeploy-x86_64.AppImage --appimage-extract >/dev/null
+          cd ..
+          export DEPLOY_GTK_VERSION=3
+          export PATH="$PWD/tools:$PATH"
+          ./tools/squashfs-root/AppRun \
+            --appdir AppDir \
+            --plugin gtk \
+            --desktop-file AppDir/usr/share/applications/meetrec.desktop \
+            --icon-file AppDir/meetrec.png \
+            --output appimage
+          mkdir -p dist
+          mv meetrec-*.AppImage dist/meetrec-linux-x86_64.AppImage
+          chmod +x dist/meetrec-linux-x86_64.AppImage
+          ls -la dist/
+
+      - name: Stage artifact
+        shell: bash
+        run: |
+          set -e
+          mkdir -p dist
+          case "${{ matrix.os }}" in
+            macos-latest)
+              app=$(ls -d target/release/bundle/osx/*.app | head -n1)
+              tar -czf "dist/${{ matrix.artifact }}" -C "$(dirname "$app")" "$(basename "$app")"
+              ;;
+            windows-latest)
+              msi=$(ls target/release/bundle/msi/*.msi 2>/dev/null | head -n1 || true)
+              if [ -z "$msi" ]; then
+                # fall back to zipping the bare binary if WiX wasn't available
+                7z a "dist/meetrec-windows-x86_64.zip" target/release/meetrec.exe
+              else
+                cp "$msi" "dist/${{ matrix.artifact }}"
+              fi
+              ;;
+            ubuntu-latest)
+              # AppImage is already in dist/ from the previous step.
+              ls dist/*.AppImage
+              ;;
+          esac
+          ls -la dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target_pretty }}
+          path: dist/*
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: List downloaded artifacts
+        run: find artifacts -type f
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true

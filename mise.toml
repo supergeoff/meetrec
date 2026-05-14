@@ -1,0 +1,19 @@
+[tools]
+rust = "latest"
+"cargo:cargo-bundle" = "latest"
+"cargo:dioxus-cli" = "latest"
+
+[tasks.dev]
+run = "dx serve"
+
+[tasks.build]
+run = "cargo build --release"
+
+[tasks.bundle]
+run = "cargo bundle --release"
+
+[tasks.update]
+run = "cargo update"
+
+[tasks.clean]
+run = "cargo clean"

@@ -1,0 +1,44 @@
+[package]
+name = "meetrec"
+version = "0.1.0"
+edition = "2021"
+description = "Recorder mono MP3 32 kbps 16 kHz, cross-platform, Rust + Dioxus"
+authors = ["Geoffroy"]
+license = "MIT"
+
+[dependencies]
+dioxus = { version = "*", features = ["desktop"] }
+dioxus-desktop = "*"
+cpal = "*"
+rubato = "*"
+mp3lame-encoder = "*"
+rfd = "*"
+directories = "*"
+chrono = "*"
+rtrb = "*"
+image = "*"
+serde = { version = "*", features = ["derive"] }
+toml = "*"
+anyhow = "*"
+log = "*"
+env_logger = "*"
+parking_lot = "*"
+futures-timer = "*"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[package.metadata.bundle]
+name = "meetrec"
+identifier = "com.geoffroy.meetrec"
+icon = ["assets/icon.png"]
+category = "public.app-category.utilities"
+short_description = "Mono MP3 32 kbps voice recorder"
+long_description = "Minimal cross-platform recorder producing mono 16 kHz 32 kbps MP3 files. Built with Rust + Dioxus."
+
+[package.metadata.bundle.osx_info_plist]
+NSMicrophoneUsageDescription = "meetrec needs access to your microphone to record meetings."
+LSMinimumSystemVersion = "10.15"
