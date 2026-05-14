@@ -19,9 +19,47 @@ use rtrb::Consumer;
 use rubato::{Fft, FixedSync, Resampler};
 
 use crate::audio::AudioState;
+use crate::transcription::samples_to_b64_wav;
 
 const TARGET_RATE: usize = 16_000;
 const RESAMPLER_CHUNK_IN: usize = 1024;
+
+/// Tees 16 kHz mono f32 samples into base64-encoded WAV chunks sent to the
+/// transcription worker.  Dropped after the encoder thread exits, which
+/// closes the channel and signals the worker to drain and stop.
+pub(crate) struct TranscriptionTee {
+    tx: std::sync::mpsc::Sender<String>,
+    accumulator: Vec<f32>,
+    chunk_samples: usize,
+}
+
+impl TranscriptionTee {
+    pub(crate) fn new(chunk_seconds: u32, tx: std::sync::mpsc::Sender<String>) -> Self {
+        let chunk_samples = chunk_seconds as usize * TARGET_RATE;
+        Self {
+            tx,
+            accumulator: Vec::with_capacity(chunk_samples),
+            chunk_samples,
+        }
+    }
+
+    /// Accumulate samples; flush complete chunks to the channel.
+    pub(crate) fn push(&mut self, samples: &[f32]) {
+        self.accumulator.extend_from_slice(samples);
+        while self.accumulator.len() >= self.chunk_samples {
+            let chunk: Vec<f32> = self.accumulator.drain(..self.chunk_samples).collect();
+            let _ = self.tx.send(samples_to_b64_wav(&chunk));
+        }
+    }
+
+    /// Send any remaining samples as a partial (shorter-than-chunk) WAV.
+    pub(crate) fn flush_partial(&mut self) {
+        if !self.accumulator.is_empty() {
+            let chunk = std::mem::take(&mut self.accumulator);
+            let _ = self.tx.send(samples_to_b64_wav(&chunk));
+        }
+    }
+}
 
 pub struct EncoderHandle {
     stop: Arc<AtomicBool>,
@@ -44,6 +82,7 @@ pub fn spawn_encoder(
     in_sample_rate: u32,
     output_path: PathBuf,
     state: Arc<AudioState>,
+    tee: Option<TranscriptionTee>,
 ) -> Result<EncoderHandle> {
     let stop = Arc::new(AtomicBool::new(false));
     let stop_thread = Arc::clone(&stop);
@@ -61,6 +100,7 @@ pub fn spawn_encoder(
                 in_sample_rate,
                 writer,
                 stop_thread,
+                tee,
             );
             if let Err(e) = &result {
                 log::error!("encoder thread error: {e:#}");
@@ -82,6 +122,7 @@ fn run_encoder(
     in_sample_rate: u32,
     mut writer: BufWriter<File>,
     stop: Arc<AtomicBool>,
+    mut tee: Option<TranscriptionTee>,
 ) -> Result<()> {
     // LAME encoder ----------------------------------------------------------
     let mut builder = Builder::new().ok_or_else(|| anyhow!("mp3lame Builder::new failed"))?;
@@ -155,6 +196,10 @@ fn run_encoder(
             mono_chunk.extend_from_slice(&mono_pending[..RESAMPLER_CHUNK_IN]);
             mono_pending.drain(..RESAMPLER_CHUNK_IN);
             let resampled = resample_mono(&mut *resampler, &mono_chunk)?;
+            // Branch B: tee 16 kHz samples to transcription accumulator.
+            if let Some(ref mut t) = tee {
+                t.push(&resampled);
+            }
             encode_and_write(&mut encoder, &resampled, &mut writer)?;
         }
 
@@ -170,7 +215,13 @@ fn run_encoder(
         }
     }
 
-    // Flush remaining sub-chunk pending samples by zero-padding to a chunk.
+    // Flush the transcription accumulator with real audio BEFORE zero-padding.
+    // Dropping `tee` here closes the channel → worker drains then exits.
+    if let Some(mut t) = tee.take() {
+        t.flush_partial();
+    }
+
+    // Flush remaining sub-chunk pending samples by zero-padding to a chunk (LAME only).
     if !mono_pending.is_empty() {
         mono_pending.resize(RESAMPLER_CHUNK_IN, 0.0);
         let resampled = resample_mono(&mut *resampler, &mono_pending)?;
@@ -207,6 +258,70 @@ fn resample_mono(
         .process(&input, 0, None)
         .map_err(|e| anyhow!("rubato process: {e}"))?;
     Ok(output.take_data())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+
+    #[test]
+    fn tee_does_not_send_before_threshold() {
+        let (tx, rx) = mpsc::channel();
+        let mut tee = TranscriptionTee::new(1, tx); // 1 s = 16 000 samples
+        tee.push(&vec![0.0f32; 100]);
+        assert!(rx.try_recv().is_err(), "should not send before threshold");
+    }
+
+    #[test]
+    fn tee_sends_one_chunk_when_exactly_at_threshold() {
+        let (tx, rx) = mpsc::channel();
+        let mut tee = TranscriptionTee::new(1, tx);
+        tee.push(&vec![0.5f32; 16_000]);
+        let chunk = rx.try_recv().expect("should have sent exactly one chunk");
+        assert!(!chunk.is_empty());
+        assert!(rx.try_recv().is_err(), "no second chunk");
+    }
+
+    #[test]
+    fn tee_sends_two_chunks_for_two_full_seconds() {
+        let (tx, rx) = mpsc::channel();
+        let mut tee = TranscriptionTee::new(1, tx);
+        tee.push(&vec![0.0f32; 32_000]);
+        rx.try_recv().expect("first chunk");
+        rx.try_recv().expect("second chunk");
+        assert!(rx.try_recv().is_err(), "no third chunk");
+    }
+
+    #[test]
+    fn tee_flush_partial_sends_remaining_samples() {
+        let (tx, rx) = mpsc::channel();
+        let mut tee = TranscriptionTee::new(1, tx);
+        tee.push(&vec![0.0f32; 500]); // below threshold
+        assert!(rx.try_recv().is_err());
+        tee.flush_partial();
+        let chunk = rx.try_recv().expect("partial chunk");
+        assert!(!chunk.is_empty());
+    }
+
+    #[test]
+    fn tee_flush_partial_on_empty_sends_nothing() {
+        let (tx, rx) = mpsc::channel();
+        let mut tee = TranscriptionTee::new(1, tx);
+        tee.flush_partial(); // nothing accumulated
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn tee_chunk_is_valid_base64() {
+        let (tx, rx) = mpsc::channel();
+        let mut tee = TranscriptionTee::new(1, tx);
+        tee.push(&vec![0.25f32; 16_000]);
+        let chunk = rx.try_recv().unwrap();
+        use base64::{engine::general_purpose::STANDARD, Engine};
+        let decoded = STANDARD.decode(&chunk).expect("must be valid base64");
+        assert_eq!(&decoded[0..4], b"RIFF", "decoded chunk must be a WAV");
+    }
 }
 
 fn encode_and_write(
