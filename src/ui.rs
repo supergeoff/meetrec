@@ -8,7 +8,7 @@ use dioxus::prelude::*;
 
 use crate::audio::AudioController;
 use crate::config::Config;
-use crate::devices::{list_input_devices, SYSTEM_DEFAULT};
+use crate::devices::{list_input_devices, SYSTEM_DEFAULT_ID};
 
 const STYLE: &str = r#"
 * { box-sizing: border-box; }
@@ -167,7 +167,7 @@ pub fn App() -> Element {
         initial
             .input_device
             .clone()
-            .unwrap_or_else(|| SYSTEM_DEFAULT.to_string())
+            .unwrap_or_else(|| SYSTEM_DEFAULT_ID.to_string())
     });
     let devices = use_signal(list_input_devices);
 
@@ -296,8 +296,12 @@ pub fn App() -> Element {
                 select {
                     value: "{device_value}",
                     onchange: on_device_change,
-                    for d in devices.read().iter() {
-                        option { value: "{d}", selected: *d == device_value, "{d}" }
+                    for entry in devices.read().iter() {
+                        option {
+                            value: "{entry.id}",
+                            selected: entry.id == device_value,
+                            "{entry.label}"
+                        }
                     }
                 }
             }

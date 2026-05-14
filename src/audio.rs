@@ -25,7 +25,7 @@ const RING_CAPACITY: usize = 48_000 * 2 * 5;
 
 pub enum AudioCommand {
     Start {
-        device_name: String,
+        device_id: String,
         output_path: PathBuf,
     },
     Pause,
@@ -88,9 +88,9 @@ impl AudioController {
         Self { tx, state }
     }
 
-    pub fn start(&self, device_name: String, output_path: PathBuf) {
+    pub fn start(&self, device_id: String, output_path: PathBuf) {
         let _ = self.tx.send(AudioCommand::Start {
-            device_name,
+            device_id,
             output_path,
         });
     }
@@ -121,7 +121,7 @@ fn audio_thread(rx: Receiver<AudioCommand>, state: Arc<AudioState>) {
     while let Ok(cmd) = rx.recv() {
         match cmd {
             AudioCommand::Start {
-                device_name,
+                device_id,
                 output_path,
             } => {
                 if session.is_some() {
@@ -129,7 +129,7 @@ fn audio_thread(rx: Receiver<AudioCommand>, state: Arc<AudioState>) {
                 }
                 accumulated_paused = std::time::Duration::ZERO;
                 pause_started_at = None;
-                match start_session(&device_name, output_path, Arc::clone(&state)) {
+                match start_session(&device_id, output_path, Arc::clone(&state)) {
                     Ok(s) => {
                         state.recording.store(true, Ordering::Release);
                         state.paused.store(false, Ordering::Release);
@@ -225,14 +225,14 @@ fn push_samples(samples: &[f32], state: &AudioState, producer: &mut rtrb::Produc
 }
 
 fn start_session(
-    device_name: &str,
+    device_id: &str,
     output_path: PathBuf,
     state: Arc<AudioState>,
 ) -> Result<ActiveSession> {
-    let device = devices::resolve_device(device_name)?;
+    let device = devices::resolve_device(device_id)?;
     let supported = device
         .default_input_config()
-        .with_context(|| format!("no default input config for '{}'", device_name))?;
+        .with_context(|| format!("no default input config for '{}'", device_id))?;
 
     let sample_format = supported.sample_format();
     let config: StreamConfig = supported.into();
@@ -240,7 +240,7 @@ fn start_session(
     let sample_rate = config.sample_rate;
 
     log::info!(
-        "starting capture: device='{device_name}' fmt={sample_format:?} rate={sample_rate} ch={channels}"
+        "starting capture: device='{device_id}' fmt={sample_format:?} rate={sample_rate} ch={channels}"
     );
 
     let (producer, consumer) = rtrb::RingBuffer::<f32>::new(RING_CAPACITY);
