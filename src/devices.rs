@@ -1,3 +1,5 @@
+#![allow(deprecated)] // cpal::DeviceTrait::name -> description(): refactor later.
+
 use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait};
 

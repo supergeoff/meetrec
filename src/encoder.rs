@@ -6,7 +6,6 @@
 
 use std::fs::File;
 use std::io::{BufWriter, Write};
-use std::mem::MaybeUninit;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -15,7 +14,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use mp3lame_encoder::{Bitrate, Builder, FlushNoGap, MonoPcm, Quality};
-use rubato::{FftFixedIn, Resampler};
+use rubato::{FastFixedIn, PolynomialDegree, Resampler};
 use rtrb::Consumer;
 
 use crate::audio::AudioState;
@@ -102,13 +101,14 @@ fn run_encoder(
         .map_err(|e| anyhow!("lame build: {e:?}"))?;
 
     // Resampler -------------------------------------------------------------
-    // rubato's FftFixedIn buffers fixed-size *input* chunks of mono f32.
+    // rubato's FastFixedIn takes fixed-size *input* chunks of mono f32 and
+    // uses polynomial interpolation — plenty for 32 kbps voice.
     let mut resampler: Box<dyn Resampler<f32> + Send> = Box::new(
-        FftFixedIn::<f32>::new(
-            in_sample_rate as usize,
-            TARGET_RATE,
+        FastFixedIn::<f32>::new(
+            TARGET_RATE as f64 / in_sample_rate as f64,
+            1.0,
+            PolynomialDegree::Septic,
             RESAMPLER_CHUNK_IN,
-            2,
             1,
         )
         .map_err(|e| anyhow!("rubato init: {e}"))?,
@@ -187,12 +187,14 @@ fn run_encoder(
     }
 
     // LAME flush — writes the final MP3 frames and the LAME tag.
-    let mut tail: Vec<MaybeUninit<u8>> = Vec::with_capacity(7200);
+    let mut tail: Vec<u8> = Vec::with_capacity(7200);
     let n = encoder
         .flush::<FlushNoGap>(tail.spare_capacity_mut())
         .map_err(|e| anyhow!("lame flush: {e:?}"))?;
-    let bytes = unsafe { std::slice::from_raw_parts(tail.as_ptr() as *const u8, n) };
-    writer.write_all(bytes)?;
+    unsafe {
+        tail.set_len(n);
+    }
+    writer.write_all(&tail)?;
     writer.flush()?;
 
     // Ensure data is on disk before returning success.
@@ -213,13 +215,15 @@ fn encode_and_write(
         return Ok(());
     }
     let cap = mp3lame_encoder::max_required_buffer_size(samples.len());
-    let mut out: Vec<MaybeUninit<u8>> = Vec::with_capacity(cap);
+    let mut out: Vec<u8> = Vec::with_capacity(cap);
     let n = encoder
         .encode(MonoPcm(samples), out.spare_capacity_mut())
         .map_err(|e| anyhow!("lame encode: {e:?}"))?;
     if n > 0 {
-        let bytes = unsafe { std::slice::from_raw_parts(out.as_ptr() as *const u8, n) };
-        writer.write_all(bytes)?;
+        unsafe {
+            out.set_len(n);
+        }
+        writer.write_all(&out)?;
     }
     Ok(())
 }

@@ -237,7 +237,7 @@ fn start_session(
     let sample_format = supported.sample_format();
     let config: StreamConfig = supported.into();
     let channels = config.channels as usize;
-    let sample_rate = config.sample_rate.0;
+    let sample_rate = config.sample_rate;
 
     log::info!(
         "starting capture: device='{device_name}' fmt={sample_format:?} rate={sample_rate} ch={channels}"
