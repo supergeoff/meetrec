@@ -1,0 +1,26 @@
+name: pr
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-windows:
+    name: build-windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install mise
+        uses: jdx/mise-action@v4
+        with:
+          install: true
+          cache: true
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: pr-windows
+
+      - name: Build (windows)
+        run: mise exec -- cargo build --release
