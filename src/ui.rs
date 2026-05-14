@@ -11,144 +11,218 @@ use crate::config::Config;
 use crate::devices::{list_input_devices, SYSTEM_DEFAULT_ID};
 
 const STYLE: &str = r#"
+@import url("https://cdn.jsdelivr.net/fontsource/fonts/red-hat-text:vf@latest/latin-wght-normal.css");
+@import url("https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;700&display=swap");
+
+:root {
+    --ink:        #000000;
+    --paper:      #FFFFFF;
+    --ink-80:     #333333;
+    --ink-70:     #4D4D4D;
+    --ink-50:     #808080;
+    --ink-25:     #BFBFBF;
+    --ink-10:     #E6E6E6;
+    --ink-05:     #F2F2F2;
+    --fg:         var(--ink);
+    --fg-muted:   var(--ink-70);
+    --fg-faint:   var(--ink-25);
+    --hairline:   var(--ink-10);
+    --r-sm:       8px;
+    --r-md:       12px;
+    --r-pill:     999px;
+    --r-circle:   50%;
+    --ease-out:   cubic-bezier(0.2, 0.0, 0, 1);
+    --dur-fast:   120ms;
+    --font-sans:  "Red Hat Text", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    --font-mono:  "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
 * { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; height: 100%; }
-body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-    background: #1d1f23;
-    color: #e6e6e6;
+html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--paper);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
     user-select: none;
 }
+
 .app {
-    padding: 18px 20px;
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 18px;
+    padding: 16px 18px;
+    height: 100%;
+    align-items: stretch;
+}
+
+/* ── left column: controls + timer + vumeter ── */
+.left {
     display: flex;
     flex-direction: column;
-    gap: 14px;
-}
-.row {
-    display: flex;
+    justify-content: center;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
 }
-.row > label {
-    flex: 0 0 110px;
-    font-size: 13px;
-    color: #aaa;
-}
-.row > input[type="text"], .row > select {
-    flex: 1;
-    background: #2a2d33;
-    color: #e6e6e6;
-    border: 1px solid #3a3d44;
-    border-radius: 6px;
-    padding: 7px 9px;
-    font-size: 13px;
-    outline: none;
-}
-.row > input[type="text"]:focus, .row > select:focus {
-    border-color: #5a8dee;
-}
-.row > button {
-    background: #3a3d44;
-    color: #e6e6e6;
-    border: none;
-    border-radius: 6px;
-    padding: 7px 14px;
-    font-size: 13px;
-    cursor: pointer;
-}
-.row > button:hover { background: #474a52; }
 
 .controls {
     display: flex;
+    gap: 10px;
     justify-content: center;
-    gap: 18px;
-    margin-top: 4px;
 }
-.ctl-btn {
-    width: 56px;
-    height: 56px;
-    border-radius: 50%;
-    border: none;
-    cursor: pointer;
-    display: flex;
+
+.ctl {
+    width: 44px; height: 44px;
+    border: none; padding: 0;
+    border-radius: var(--r-circle);
+    background: var(--ink-05);
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    background: #2a2d33;
-    transition: background 120ms ease;
+    cursor: pointer;
+    transition: background var(--dur-fast) var(--ease-out),
+                transform var(--dur-fast) var(--ease-out);
 }
-.ctl-btn:hover { background: #3a3d44; }
-.ctl-btn.stop { background: #2a2d33; }
-.ctl-btn .circle {
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    background: #e74c3c;
-    box-shadow: 0 0 0 2px rgba(231,76,60,0.18);
+.ctl:hover:not(:disabled) { background: var(--ink-10); }
+.ctl:active:not(:disabled) { transform: scale(0.97); }
+.ctl:disabled { cursor: default; }
+.ctl:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+.ctl.rec {
+    background: var(--ink);
+    animation: pois-pulse 1.1s ease-in-out infinite;
 }
-.ctl-btn.pulsing .circle {
-    animation: pulse 1.1s ease-in-out infinite;
+
+@keyframes pois-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(0,0,0,0.55); }
+    50%      { box-shadow: 0 0 0 14px rgba(0,0,0,0); }
 }
-@keyframes pulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(231,76,60,0.55); }
-    50% { box-shadow: 0 0 0 14px rgba(231,76,60,0.0); }
+
+.circle {
+    width: 16px; height: 16px;
+    border-radius: var(--r-circle);
+    background: var(--ink);
 }
-.ctl-btn .pause-bars {
-    display: flex;
-    gap: 4px;
-}
-.ctl-btn .pause-bars span {
+.ctl.rec .circle { background: var(--paper); }
+
+.pause-bars { display: flex; gap: 3px; }
+.pause-bars span {
     display: block;
-    width: 5px;
-    height: 20px;
-    background: #e6e6e6;
+    width: 4px; height: 15px;
+    background: var(--ink);
     border-radius: 1px;
 }
-.ctl-btn .square {
-    width: 18px;
-    height: 18px;
-    background: #e6e6e6;
+
+.square {
+    width: 12px; height: 12px;
+    background: var(--ink);
     border-radius: 2px;
 }
-.ctl-btn .play-tri {
-    width: 0;
-    height: 0;
-    border-left: 14px solid #e6e6e6;
-    border-top: 9px solid transparent;
-    border-bottom: 9px solid transparent;
-    margin-left: 4px;
+
+.tri {
+    width: 0; height: 0;
+    border-left: 11px solid var(--ink);
+    border-top: 7px solid transparent;
+    border-bottom: 7px solid transparent;
+    margin-left: 3px;
 }
+
 .timer {
-    text-align: center;
-    font-size: 32px;
+    font-family: var(--font-mono);
+    font-size: 26px;
+    letter-spacing: 1.5px;
     font-variant-numeric: tabular-nums;
-    letter-spacing: 2px;
-    color: #f0f0f0;
+    color: var(--ink);
+    text-align: center;
+    line-height: 1;
 }
+
 .vumeter {
     position: relative;
-    height: 10px;
-    background: #2a2d33;
-    border-radius: 5px;
+    width: 180px;
+    height: 6px;
+    background: var(--ink-05);
+    border-radius: var(--r-pill);
     overflow: hidden;
 }
 .vu-bar {
     position: absolute;
     left: 0; top: 0; bottom: 0;
-    background: linear-gradient(90deg, #4caf50 0%, #ffeb3b 70%, #e74c3c 100%);
+    background: var(--ink);
+    border-radius: var(--r-pill);
     transition: width 60ms linear;
 }
-.error {
-    background: #5a1f1f;
-    color: #ffd9d9;
-    padding: 8px 10px;
-    border-radius: 6px;
-    font-size: 12px;
+
+/* ── right column: form rows ── */
+.right {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    justify-content: center;
+    min-width: 0;
 }
-.hint {
-    text-align: center;
-    color: #777;
+
+.row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.row > label {
+    flex: 0 0 92px;
     font-size: 12px;
+    color: var(--fg-muted);
+}
+
+.input, .select {
+    flex: 1;
+    min-width: 0;
+    background: var(--paper);
+    color: var(--ink);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-sm);
+    padding: 6px 10px;
+    font-family: var(--font-sans);
+    font-size: 12px;
+    outline: none;
+    transition: border-color var(--dur-fast) var(--ease-out);
+}
+.input:focus, .select:focus { border-color: var(--ink); }
+
+.browse {
+    background: var(--paper);
+    color: var(--ink);
+    box-shadow: inset 0 0 0 1px var(--ink);
+    border: none;
+    border-radius: var(--r-pill);
+    padding: 6px 14px;
+    font-family: var(--font-sans);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background var(--dur-fast) var(--ease-out),
+                transform var(--dur-fast) var(--ease-out);
+}
+.browse:hover { background: var(--ink-05); }
+.browse:active { transform: scale(0.97); }
+
+.footer {
+    margin-top: 2px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--fg-faint);
+    letter-spacing: 0.04em;
+    text-align: center;
+}
+
+.error {
+    background: var(--ink);
+    color: var(--paper);
+    padding: 6px 10px;
+    border-radius: var(--r-sm);
+    font-size: 11px;
+    line-height: 1.4;
 }
 "#;
 
@@ -177,7 +251,7 @@ pub fn App() -> Element {
     let mut peak_db = use_signal(|| f32::NEG_INFINITY);
     let mut error = use_signal::<Option<String>>(|| None);
 
-    // Poll the audio thread state at ~30 Hz.
+    // ── poll the audio thread state at ~30 Hz ───────────────────────────
     {
         let controller = Arc::clone(&controller);
         use_future(move || {
@@ -197,7 +271,7 @@ pub fn App() -> Element {
         });
     }
 
-    // Persist config when folder or device changes.
+    // ── persist config when folder or device changes ────────────────────
     use_effect(move || {
         let cfg = Config {
             output_folder: Some(output_folder.read().clone()),
@@ -208,6 +282,7 @@ pub fn App() -> Element {
         }
     });
 
+    // ── derived view state ──────────────────────────────────────────────
     let folder_str = output_folder.read().to_string_lossy().to_string();
     let device_value = selected_device.read().clone();
     let recording_now = *recording.read();
@@ -219,13 +294,13 @@ pub fn App() -> Element {
     let timer_text = format!("{:02}:{:02}", mm, ss);
 
     let db = *peak_db.read();
-    // Map [-60dB .. 0dB] → [0 .. 100]%.
     let meter_pct: f32 = if db.is_finite() {
         ((db + 60.0) / 60.0 * 100.0).clamp(0.0, 100.0)
     } else {
         0.0
     };
 
+    // ── handlers ────────────────────────────────────────────────────────
     let on_browse = move |_| {
         spawn(async move {
             let start = output_folder.read().clone();
@@ -237,8 +312,7 @@ pub fn App() -> Element {
     };
 
     let on_folder_input = move |evt: Event<FormData>| {
-        let v = evt.value();
-        output_folder.set(PathBuf::from(v));
+        output_folder.set(PathBuf::from(evt.value()));
     };
 
     let on_device_change = move |evt: Event<FormData>| {
@@ -281,84 +355,98 @@ pub fn App() -> Element {
         style { {STYLE} }
         div { class: "app",
 
-            div { class: "row",
-                label { "Output folder" }
-                input {
-                    r#type: "text",
-                    value: "{folder_str}",
-                    oninput: on_folder_input,
-                }
-                button { onclick: on_browse, "Browse…" }
-            }
-
-            div { class: "row",
-                label { "Input device" }
-                select {
-                    value: "{device_value}",
-                    onchange: on_device_change,
-                    for entry in devices.read().iter() {
-                        option {
-                            value: "{entry.id}",
-                            selected: entry.id == device_value,
-                            "{entry.label}"
-                        }
-                    }
-                }
-            }
-
-            div { class: "controls",
-                if !recording_now {
-                    button {
-                        class: "ctl-btn",
-                        title: "Record",
-                        onclick: start_recording,
-                        span { class: "circle" }
-                    }
-                } else {
-                    if paused_now {
+            // ── left column: transport ────────────────────────────
+            div { class: "left",
+                div { class: "controls",
+                    if !recording_now {
                         button {
-                            class: "ctl-btn",
-                            title: "Resume",
-                            onclick: resume_recording,
-                            span { class: "play-tri" }
-                        }
-                    } else {
-                        button {
-                            class: "ctl-btn pulsing",
-                            title: "Recording",
-                            disabled: true,
+                            class: "ctl",
+                            title: "Record",
+                            onclick: start_recording,
                             span { class: "circle" }
                         }
+                    } else {
+                        if paused_now {
+                            button {
+                                class: "ctl",
+                                title: "Resume",
+                                onclick: resume_recording,
+                                span { class: "tri" }
+                            }
+                        } else {
+                            button {
+                                class: "ctl rec",
+                                title: "Recording",
+                                disabled: true,
+                                span { class: "circle" }
+                            }
+                            button {
+                                class: "ctl",
+                                title: "Pause",
+                                onclick: pause_recording,
+                                span { class: "pause-bars",
+                                    span {}
+                                    span {}
+                                }
+                            }
+                        }
                         button {
-                            class: "ctl-btn",
-                            title: "Pause",
-                            onclick: pause_recording,
-                            span { class: "pause-bars",
-                                span {}
-                                span {}
+                            class: "ctl",
+                            title: "Stop",
+                            onclick: stop_recording,
+                            span { class: "square" }
+                        }
+                    }
+                }
+
+                div { class: "timer", "{timer_text}" }
+
+                div { class: "vumeter",
+                    div {
+                        class: "vu-bar",
+                        style: "width: {meter_pct}%;",
+                    }
+                }
+            }
+
+            // ── right column: settings ────────────────────────────
+            div { class: "right",
+                div { class: "row",
+                    label { "Output folder" }
+                    input {
+                        class: "input",
+                        r#type: "text",
+                        value: "{folder_str}",
+                        oninput: on_folder_input,
+                    }
+                    button {
+                        class: "browse",
+                        onclick: on_browse,
+                        "Browse…"
+                    }
+                }
+
+                div { class: "row",
+                    label { "Input device" }
+                    select {
+                        class: "select",
+                        value: "{device_value}",
+                        onchange: on_device_change,
+                        for entry in devices.read().iter() {
+                            option {
+                                value: "{entry.id}",
+                                selected: entry.id == device_value,
+                                "{entry.label}"
                             }
                         }
                     }
-                    button {
-                        class: "ctl-btn stop",
-                        title: "Stop",
-                        onclick: stop_recording,
-                        span { class: "square" }
-                    }
                 }
-            }
 
-            div { class: "timer", "{timer_text}" }
-
-            div { class: "vumeter",
-                div {
-                    class: "vu-bar",
-                    style: "width: {meter_pct}%;",
+                if let Some(msg) = error.read().clone() {
+                    div { class: "error", "{msg}" }
+                } else {
+                    div { class: "footer", "mono · 32 kbps · 16 kHz" }
                 }
-            }
-
-            if let Some(msg) = error.read().clone() {
-                div { class: "error", "{msg}" }
             }
         }
     }

@@ -25,8 +25,8 @@ fn main() {
 
     let window = WindowBuilder::new()
         .with_title("meetrec")
-        .with_inner_size(LogicalSize::new(440.0, 320.0))
-        .with_min_inner_size(LogicalSize::new(380.0, 280.0))
+        .with_inner_size(LogicalSize::new(580.0, 240.0))
+        .with_min_inner_size(LogicalSize::new(500.0, 220.0))
         .with_resizable(true)
         .with_window_icon(icon);
 
