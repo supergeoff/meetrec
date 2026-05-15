@@ -11,6 +11,7 @@ use dioxus_desktop::{use_window, LogicalSize};
 use crate::audio::AudioController;
 use crate::config::{Config, SummaryConfig, TranscriptionConfig, UiConfig};
 use crate::devices::{list_input_devices, SYSTEM_DEFAULT_ID};
+use crate::session::create_session_dir;
 use crate::summary::{call_summary_api, ParsedSummary};
 
 #[derive(Clone, PartialEq)]
@@ -779,7 +780,16 @@ pub fn App() -> Element {
             session_transcription.set(Some(transcription.clone()));
 
             let stamp = Local::now().format("%Y%m%d_%H%M%S").to_string();
-            let path = folder.join(format!("meeting_{}.mp3", stamp));
+            let session_dir = match create_session_dir(&folder, &stamp) {
+                Ok(d) => d,
+                Err(e) => {
+                    error.set(Some(format!(
+                        "Impossible de créer le dossier de session : {e}"
+                    )));
+                    return;
+                }
+            };
+            let path = session_dir.join("recording.mp3");
             session_mp3_path.set(Some(path.clone()));
             let device = selected_device.read().clone();
             let tc = if transcription.enabled { Some(transcription) } else { None };
@@ -864,8 +874,9 @@ pub fn App() -> Element {
                         Ok(parsed) => {
                             let degraded = parsed.is_degraded();
                             let markdown = parsed.into_markdown();
-                            let md_path = mp3.with_extension("md");
-                            let txt_path = mp3.with_extension("txt");
+                            let session_dir = mp3.parent().unwrap_or_else(|| mp3.as_path());
+                            let md_path = session_dir.join("summary.md");
+                            let txt_path = session_dir.join("transcript.txt");
                             if let Err(e) = std::fs::write(&md_path, &markdown) {
                                 summary_error
                                     .set(Some(format!("Erreur d'écriture du .md : {e}")));
