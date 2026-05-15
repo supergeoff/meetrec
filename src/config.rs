@@ -1,8 +1,58 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
+
+pub trait DirSource {
+    fn config_base(&self) -> Option<PathBuf>;
+}
+
+struct SystemDirs;
+
+impl DirSource for SystemDirs {
+    fn config_base(&self) -> Option<PathBuf> {
+        directories::BaseDirs::new().map(|b| b.config_dir().to_path_buf())
+    }
+}
+
+pub fn data_dir_with(source: &dyn DirSource) -> Option<PathBuf> {
+    source.config_base().map(|d| d.join("meetrec"))
+}
+
+pub fn data_dir() -> Option<PathBuf> {
+    data_dir_with(&SystemDirs)
+}
+
+fn migrate_dirs(old_dir: &Path, new_dir: &Path) {
+    if old_dir.exists() && !new_dir.exists() {
+        match std::fs::rename(old_dir, new_dir) {
+            Ok(()) => log::info!(
+                "migrated data dir: {} → {}",
+                old_dir.display(),
+                new_dir.display()
+            ),
+            Err(e) => log::warn!(
+                "could not migrate {}: {}",
+                old_dir.display(),
+                e
+            ),
+        }
+    }
+}
+
+pub fn migrate_if_needed() {
+    let new_dir = match data_dir() {
+        Some(d) => d,
+        None => return,
+    };
+    let old_dir = match directories::ProjectDirs::from("com", "geoffroy", "meetrec")
+        .map(|d| d.config_dir().to_path_buf())
+    {
+        Some(d) => d,
+        None => return,
+    };
+    migrate_dirs(&old_dir, &new_dir);
+}
 
 const PLAIN_TEXT_WARNING: &str = "\
 # WARNING: API keys are stored in plain text in this file.\n\
@@ -104,7 +154,7 @@ impl Config {
     }
 
     pub fn path() -> Option<PathBuf> {
-        ProjectDirs::from("com", "geoffroy", "meetrec").map(|d| d.config_dir().join("config.toml"))
+        data_dir().map(|d| d.join("config.toml"))
     }
 
     pub fn default_output_folder() -> PathBuf {
@@ -118,6 +168,64 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct FakeDirSource(PathBuf);
+
+    impl DirSource for FakeDirSource {
+        fn config_base(&self) -> Option<PathBuf> {
+            Some(self.0.clone())
+        }
+    }
+
+    #[test]
+    fn data_dir_last_segment_is_meetrec() {
+        let src = FakeDirSource(PathBuf::from("/home/user/.config"));
+        let dir = data_dir_with(&src).unwrap();
+        assert_eq!(dir.file_name().unwrap().to_str().unwrap(), "meetrec");
+    }
+
+    #[test]
+    fn data_dir_contains_no_geoffroy_segment() {
+        let src = FakeDirSource(PathBuf::from("/home/user/.config"));
+        let dir = data_dir_with(&src).unwrap();
+        let s = dir.to_string_lossy();
+        assert!(!s.contains("geoffroy"), "path must not contain 'geoffroy': {s}");
+    }
+
+    #[test]
+    fn migrate_moves_old_dir_contents_to_new_dir() {
+        let base = std::env::temp_dir().join("meetrec_test_migrate");
+        let old_dir = base.join("old");
+        let new_dir = base.join("new");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&old_dir).unwrap();
+        std::fs::write(old_dir.join("config.toml"), b"data").unwrap();
+
+        migrate_dirs(&old_dir, &new_dir);
+
+        assert!(!old_dir.exists(), "old dir should be renamed away");
+        assert!(new_dir.join("config.toml").exists(), "config.toml should be at new path");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn migrate_skips_when_new_dir_already_exists() {
+        let base = std::env::temp_dir().join("meetrec_test_migrate_skip");
+        let old_dir = base.join("old");
+        let new_dir = base.join("new");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&old_dir).unwrap();
+        std::fs::create_dir_all(&new_dir).unwrap();
+        std::fs::write(old_dir.join("config.toml"), b"old").unwrap();
+        std::fs::write(new_dir.join("config.toml"), b"new").unwrap();
+
+        migrate_dirs(&old_dir, &new_dir);
+
+        let content = std::fs::read(new_dir.join("config.toml")).unwrap();
+        assert_eq!(content, b"new", "new dir content must not be overwritten");
+        assert!(old_dir.exists(), "old dir must be left intact when new dir exists");
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn default_config_has_expected_values() {
