@@ -299,7 +299,10 @@ fn start_session(
     // Build the optional transcription tee + worker.
     let (tee, transcription_handle) =
         if let Some(cfg) = transcription_cfg.filter(|c| c.enabled) {
-            let txt_path = output_path.with_extension("txt");
+            let txt_path = output_path
+                .parent()
+                .map(|d| d.join("transcript.txt"))
+                .unwrap_or_else(|| output_path.with_extension("txt"));
             let (tx_chunks, rx_chunks) = std::sync::mpsc::channel::<String>();
             let tee = TranscriptionTee::new(cfg.chunk_seconds, tx_chunks);
             let handle =

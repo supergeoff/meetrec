@@ -4,6 +4,7 @@ mod audio;
 mod config;
 mod devices;
 mod encoder;
+mod session;
 mod summary;
 mod transcription;
 mod ui;
