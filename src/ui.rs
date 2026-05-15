@@ -6,8 +6,10 @@ use std::time::Duration;
 use chrono::Local;
 use dioxus::prelude::*;
 
+use dioxus_desktop::{use_window, LogicalSize};
+
 use crate::audio::AudioController;
-use crate::config::{Config, SummaryConfig, TranscriptionConfig};
+use crate::config::{Config, SummaryConfig, TranscriptionConfig, UiConfig};
 use crate::devices::{list_input_devices, SYSTEM_DEFAULT_ID};
 
 const STYLE: &str = r#"
@@ -49,21 +51,12 @@ html, body {
 }
 
 .app {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-    padding: 16px 18px;
-    height: 100%;
-    min-height: 0;
-}
-
-/* ── top row: controls + settings ── */
-.app-top {
     display: grid;
     grid-template-columns: 220px 1fr;
     gap: 18px;
+    padding: 16px 18px;
+    height: 100%;
     align-items: stretch;
-    flex-shrink: 0;
 }
 
 /* ── left column: controls + timer + vumeter ── */
@@ -95,7 +88,7 @@ html, body {
 }
 .ctl:hover:not(:disabled) { background: var(--ink-10); }
 .ctl:active:not(:disabled) { transform: scale(0.97); }
-.ctl:disabled { cursor: default; }
+.ctl:disabled { cursor: default; opacity: 0.35; }
 .ctl:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 
 .ctl.rec {
@@ -256,63 +249,6 @@ html, body {
 }
 .settings-btn:hover { color: var(--ink); background: var(--ink-05); }
 
-/* ── transcript panel ── */
-.transcript-panel {
-    flex: 1;
-    min-height: 100px;
-    border: 1px solid var(--hairline);
-    border-radius: var(--r-md);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-}
-.transcript-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 7px 12px;
-    border-bottom: 1px solid var(--hairline);
-    flex-shrink: 0;
-}
-.transcript-title {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--fg-muted);
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-}
-.transcript-body {
-    flex: 1;
-    overflow-y: auto;
-    padding: 10px 12px;
-    font-family: var(--font-mono);
-    font-size: 11px;
-    line-height: 1.7;
-    white-space: pre-wrap;
-    word-break: break-word;
-    user-select: text;
-}
-.transcript-empty {
-    color: var(--fg-faint);
-    font-family: var(--font-sans);
-    font-style: italic;
-    font-size: 12px;
-}
-.transcript-waiting-dot {
-    display: inline-block;
-    width: 5px;
-    height: 5px;
-    border-radius: var(--r-circle);
-    background: var(--ink-25);
-    vertical-align: middle;
-    margin-left: 4px;
-    animation: t-pulse 1.2s ease-in-out infinite;
-}
-@keyframes t-pulse {
-    0%, 100% { opacity: 0.25; }
-    50%       { opacity: 1;    }
-}
-
 /* ── settings modal ── */
 .modal-backdrop {
     position: fixed;
@@ -449,6 +385,102 @@ html, body {
 .btn-primary { background: var(--ink); color: var(--paper); }
 .btn-primary:hover { opacity: 0.85; }
 .modal-err { font-size: 11px; color: #c00; }
+
+/* ── app grid with expanded transcript panel ── */
+.app.panel-open {
+    grid-template-columns: 220px 1fr 260px;
+}
+
+/* ── transcript panel ── */
+.panel {
+    display: flex;
+    flex-direction: column;
+    border-left: 1px solid var(--hairline);
+    padding: 10px 12px 10px 14px;
+    overflow: hidden;
+    gap: 6px;
+    min-width: 0;
+}
+.panel-hdr {
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+    flex-shrink: 0;
+}
+.panel-body {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.panel-line {
+    font-size: 11px;
+    line-height: 1.55;
+    color: var(--fg-muted);
+}
+.panel-notice {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: 100%;
+    text-align: center;
+    font-size: 11px;
+    color: var(--fg-faint);
+}
+.panel-notice .btn-setup {
+    margin-top: 2px;
+}
+
+/* ── "configure transcription" shortcut button ── */
+.btn-setup {
+    background: var(--paper);
+    color: var(--ink);
+    box-shadow: inset 0 0 0 1px var(--hairline);
+    border: none;
+    border-radius: var(--r-pill);
+    padding: 5px 12px;
+    font-family: var(--font-sans);
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background var(--dur-fast) var(--ease-out);
+}
+.btn-setup:hover { background: var(--ink-05); }
+
+/* ── record-blocked hint below controls ── */
+.rec-blocked-hint {
+    font-size: 10px;
+    color: var(--fg-faint);
+    text-align: center;
+    line-height: 1.4;
+    max-width: 160px;
+}
+
+/* ── chevron toggle button (fixed right edge) ── */
+.chevron-btn {
+    position: fixed;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    background: var(--ink-05);
+    border: none;
+    border-left: 1px solid var(--hairline);
+    border-radius: var(--r-sm) 0 0 var(--r-sm);
+    color: var(--fg-muted);
+    font-size: 12px;
+    line-height: 1;
+    padding: 10px 3px;
+    cursor: pointer;
+    z-index: 10;
+    transition: background var(--dur-fast) var(--ease-out),
+                color var(--dur-fast) var(--ease-out);
+}
+.chevron-btn:hover { background: var(--ink-10); color: var(--ink); }
 "#;
 
 #[component]
@@ -470,6 +502,8 @@ pub fn App() -> Element {
     });
     let devices = use_signal(list_input_devices);
 
+    let window = use_window();
+
     let mut recording = use_signal(|| false);
     let mut paused = use_signal(|| false);
     let mut elapsed_ms = use_signal(|| 0u64);
@@ -484,10 +518,15 @@ pub fn App() -> Element {
     // Extended config sections — only updated via the settings modal Save button.
     let mut saved_transcription = use_signal(|| initial.transcription.clone());
     let mut saved_summary = use_signal(|| initial.summary.clone());
-    let saved_ui_cfg = use_signal(|| initial.ui.clone());
+    let mut saved_ui_cfg = use_signal(|| initial.ui.clone());
 
     // Session-frozen copy of TranscriptionConfig set at record start and cleared at stop.
+    // The transcription worker reads from this snapshot, not from live signals.
     let mut session_transcription = use_signal::<Option<TranscriptionConfig>>(|| None);
+
+    // Transcript lines produced by the transcription worker (future commit).
+    // Panel renders these as they arrive; empty = no transcript yet.
+    let transcript_lines = use_signal::<Vec<String>>(Vec::new);
 
     // Modal visibility and active tab (0 = Transcription, 1 = Résumé)
     let mut show_settings = use_signal(|| false);
@@ -535,15 +574,6 @@ pub fn App() -> Element {
         });
     }
 
-    // ── auto-scroll transcript to bottom when new text arrives ──────────
-    use_effect(move || {
-        let _ = transcript_version_seen.read();
-        let _ = document::eval(
-            "var e = document.getElementById('transcript-body');\
-             if (e) e.scrollTop = e.scrollHeight;",
-        );
-    });
-
     // ── persist config when any saved field changes ──────────────────────
     use_effect(move || {
         let cfg = Config {
@@ -578,9 +608,12 @@ pub fn App() -> Element {
 
     let tab = *settings_tab.read();
     let same_key = *d_same_key.read();
-    let transcription_enabled_in_cfg = saved_transcription.read().enabled;
-    let current_transcript = transcript_text.read().clone();
-    let waiting_for_chunk = *transcript_waiting.read();
+
+    let panel_expanded = saved_ui_cfg.read().transcription_panel_expanded;
+    let transcription_unconfigured = {
+        let t = saved_transcription.read();
+        t.enabled && t.api_key.trim().is_empty()
+    };
 
     // ── handlers ────────────────────────────────────────────────────────
     let on_browse = move |_| {
@@ -650,8 +683,59 @@ pub fn App() -> Element {
         }
     };
 
+    // ── panel toggle ────────────────────────────────────────────────────
+    let toggle_panel = {
+        let window = window.clone();
+        move |_| {
+            let new_val = !saved_ui_cfg.read().transcription_panel_expanded;
+            saved_ui_cfg.set(UiConfig { transcription_panel_expanded: new_val });
+            let w: f64 = if new_val { 860.0 } else { 580.0 };
+            window.set_inner_size(LogicalSize::new(w, 240.0_f64));
+        }
+    };
+
     // ── settings modal handlers ──────────────────────────────────────────
     let open_settings = move |_| {
+        let t = saved_transcription.read().clone();
+        let s = saved_summary.read().clone();
+        d_t_enabled.set(t.enabled);
+        d_t_base_url.set(t.base_url);
+        d_t_api_key.set(t.api_key.clone());
+        d_t_model.set(t.model);
+        d_t_chunk.set(t.chunk_seconds.to_string());
+        d_t_lang.set(t.language.unwrap_or_default());
+        d_s_base_url.set(s.base_url);
+        d_s_api_key.set(s.api_key);
+        d_s_model.set(s.model);
+        d_s_prompt.set(s.prompt_template);
+        d_same_key.set(false);
+        modal_error.set(None);
+        settings_tab.set(0);
+        show_settings.set(true);
+    };
+
+    // Shortcut from blocked-record hint (left column) → opens settings on tab 0.
+    let configure_tc_hint = move |_| {
+        let t = saved_transcription.read().clone();
+        let s = saved_summary.read().clone();
+        d_t_enabled.set(t.enabled);
+        d_t_base_url.set(t.base_url);
+        d_t_api_key.set(t.api_key.clone());
+        d_t_model.set(t.model);
+        d_t_chunk.set(t.chunk_seconds.to_string());
+        d_t_lang.set(t.language.unwrap_or_default());
+        d_s_base_url.set(s.base_url);
+        d_s_api_key.set(s.api_key);
+        d_s_model.set(s.model);
+        d_s_prompt.set(s.prompt_template);
+        d_same_key.set(false);
+        modal_error.set(None);
+        settings_tab.set(0);
+        show_settings.set(true);
+    };
+
+    // Same as above but for transcript panel buttons (separate closure to avoid double-move).
+    let configure_tc_panel = move |_| {
         let t = saved_transcription.read().clone();
         let s = saved_summary.read().clone();
         d_t_enabled.set(t.enabled);
@@ -713,140 +797,171 @@ pub fn App() -> Element {
 
     rsx! {
         style { {STYLE} }
-        div { class: "app",
+        div { class: if panel_expanded { "app panel-open" } else { "app" },
 
-            // ── top row: transport + settings ────────────────────────────
-            div { class: "app-top",
-
-                // ── left column: transport ────────────────────────────
-                div { class: "left",
-                    div { class: "controls",
-                        if !recording_now {
-                            button {
-                                class: "ctl",
-                                title: "Record",
-                                onclick: start_recording,
-                                span { class: "circle" }
-                            }
-                        } else {
-                            if paused_now {
-                                button {
-                                    class: "ctl",
-                                    title: "Resume",
-                                    onclick: resume_recording,
-                                    span { class: "tri" }
-                                }
-                            } else {
-                                button {
-                                    class: "ctl rec",
-                                    title: "Recording",
-                                    disabled: true,
-                                    span { class: "circle" }
-                                }
-                                button {
-                                    class: "ctl",
-                                    title: "Pause",
-                                    onclick: pause_recording,
-                                    span { class: "pause-bars",
-                                        span {}
-                                        span {}
-                                    }
-                                }
-                            }
-                            button {
-                                class: "ctl",
-                                title: "Stop",
-                                onclick: stop_recording,
-                                span { class: "square" }
-                            }
-                        }
-                    }
-
-                    div { class: "timer", "{timer_text}" }
-
-                    div { class: "vumeter",
-                        div {
-                            class: "vu-bar",
-                            style: "width: {meter_pct}%;",
-                        }
-                    }
-                }
-
-                // ── right column: settings ────────────────────────────
-                div { class: "right",
-                    div { class: "row",
-                        label { "Output folder" }
-                        input {
-                            class: "input",
-                            r#type: "text",
-                            value: "{folder_str}",
-                            oninput: on_folder_input,
-                        }
+// ── left column: transport ────────────────────────────
+            div { class: "left",
+                div { class: "controls",
+                    if !recording_now {
                         button {
-                            class: "browse",
-                            onclick: on_browse,
-                            "Browse…"
-                        }
-                    }
-
-                    div { class: "row",
-                        label { "Input device" }
-                        select {
-                            class: "select",
-                            value: "{device_value}",
-                            onchange: on_device_change,
-                            for entry in devices.read().iter() {
-                                option {
-                                    value: "{entry.id}",
-                                    selected: entry.id == device_value,
-                                    "{entry.label}"
-                                }
-                            }
-                        }
-                    }
-
-                    div { class: "footer-row",
-                        div { class: "footer-left",
-                            if let Some(msg) = error.read().clone() {
-                                div { class: "error", "{msg}" }
-                            } else {
-                                div { class: "footer", "mono · 32 kbps · 16 kHz" }
-                            }
-                        }
-                        button {
-                            class: "settings-btn",
-                            title: "Paramètres",
-                            onclick: open_settings,
-                            "⚙"
-                        }
-                    }
-                }
-            }
-
-            // ── transcript panel ──────────────────────────────────────
-            div { class: "transcript-panel",
-                div { class: "transcript-header",
-                    span { class: "transcript-title", "Transcription" }
-                    if waiting_for_chunk {
-                        span { class: "transcript-waiting-dot" }
-                    }
-                }
-                div {
-                    id: "transcript-body",
-                    class: "transcript-body",
-                    if !transcription_enabled_in_cfg {
-                        span { class: "transcript-empty",
-                            "Transcription désactivée dans les paramètres"
-                        }
-                    } else if current_transcript.is_empty() {
-                        span { class: "transcript-empty",
-                            "En attente du premier chunk…"
+                            class: "ctl",
+                            title: if transcription_unconfigured { "Transcription non configurée" } else { "Record" },
+                            disabled: transcription_unconfigured,
+                            onclick: start_recording,
+                            span { class: "circle" }
                         }
                     } else {
-                        "{current_transcript}"
+                        if paused_now {
+                            button {
+                                class: "ctl",
+                                title: "Resume",
+                                onclick: resume_recording,
+                                span { class: "tri" }
+                            }
+                        } else {
+                            button {
+                                class: "ctl rec",
+                                title: "Recording",
+                                disabled: true,
+                                span { class: "circle" }
+                            }
+                            button {
+                                class: "ctl",
+                                title: "Pause",
+                                onclick: pause_recording,
+                                span { class: "pause-bars",
+                                    span {}
+                                    span {}
+                                }
+                            }
+                        }
+                        button {
+                            class: "ctl",
+                            title: "Stop",
+                            onclick: stop_recording,
+                            span { class: "square" }
+                        }
+                    }
+                }
+
+                div { class: "timer", "{timer_text}" }
+
+                div { class: "vumeter",
+                    div {
+                        class: "vu-bar",
+                        style: "width: {meter_pct}%;",
                     }
                 }
             }
+
+            // ── right column: settings ────────────────────────────
+            div { class: "right",
+                div { class: "row",
+                    label { "Output folder" }
+                    input {
+                        class: "input",
+                        r#type: "text",
+                        value: "{folder_str}",
+                        oninput: on_folder_input,
+                    }
+                    button {
+                        class: "browse",
+                        onclick: on_browse,
+                        "Browse…"
+                    }
+                }
+
+                div { class: "row",
+                    label { "Input device" }
+                    select {
+                        class: "select",
+                        value: "{device_value}",
+                        onchange: on_device_change,
+                        for entry in devices.read().iter() {
+                            option {
+                                value: "{entry.id}",
+                                selected: entry.id == device_value,
+                                "{entry.label}"
+                            }
+                        }
+                    }
+                }
+
+                div { class: "footer-row",
+                    div { class: "footer-left",
+                        if let Some(msg) = error.read().clone() {
+                            div { class: "error", "{msg}" }
+                        } else {
+                            div { class: "footer", "mono · 32 kbps · 16 kHz" }
+                        }
+                    }
+                    button {
+                        class: "settings-btn",
+                        title: "Paramètres",
+                        onclick: open_settings,
+                        "⚙"
+                    }
+                }
+            }
+
+            if transcription_unconfigured {
+                div { class: "rec-blocked-hint",
+                    "Transcription activée sans clé API"
+                    button {
+                        class: "btn-setup",
+                        style: "display: block; margin-top: 4px;",
+                        onclick: configure_tc_hint,
+                        "⚙ Configurer"
+                    }
+                }
+            }
+            // ── transcript panel (third column, only when expanded) ──
+            if panel_expanded {
+                div { class: "panel",
+                    div { class: "panel-hdr", "Transcription" }
+                    div { class: "panel-body",
+                        if transcription_unconfigured {
+                            div { class: "panel-notice",
+                                "Clé API manquante — l'enregistrement est désactivé."
+                                button {
+                                    class: "btn-setup",
+                                    onclick: configure_tc_panel,
+                                    "⚙ Configurer la transcription"
+                                }
+                            }
+                        } else if !saved_transcription.read().enabled {
+                            div { class: "panel-notice",
+                                "Transcription désactivée."
+                                button {
+                                    class: "btn-setup",
+                                    onclick: configure_tc_panel,
+                                    "⚙ Activer dans les paramètres"
+                                }
+                            }
+                        } else if recording_now {
+                            if transcript_lines.read().is_empty() {
+                                div { class: "panel-notice", "Transcription en cours…" }
+                            } else {
+                                for line in transcript_lines.read().iter() {
+                                    div { class: "panel-line", "{line}" }
+                                }
+                            }
+                        } else {
+                            div { class: "panel-notice",
+                                "Lancez un enregistrement pour démarrer la transcription."
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── chevron toggle (fixed right edge) ────────────────────
+        button {
+            class: "chevron-btn",
+            title: if panel_expanded { "Réduire le panel" } else { "Afficher la transcription" },
+            onclick: toggle_panel,
+            if panel_expanded { "‹" } else { "›" }
         }
 
         // ── settings modal ────────────────────────────────────────
