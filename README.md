@@ -76,11 +76,22 @@ On systems without FUSE you can extract and run:
 
 ## Config
 
-Persistent config lives at:
+All user data lives in a single directory alongside `config.toml`:
 
-- macOS:   `~/Library/Application Support/meetrec/config.toml`
-- Windows: `%APPDATA%\meetrec\config.toml`
-- Linux:   `~/.config/meetrec/config.toml`
+| Platform | Path |
+|----------|------|
+| macOS    | `~/Library/Application Support/meetrec/` |
+| Windows  | `%APPDATA%\meetrec\` |
+| Linux    | `~/.config/meetrec/` |
+
+Files in this directory:
+
+| File | Description |
+|------|-------------|
+| `config.toml` | Persistent settings (API keys, model, audio output folder, UI state) |
+| `meetrec.log` | Latest run log (rotated to `meetrec.log.1` at 5 MB) |
+
+**Migration:** if an old `…/geoffroy/meetrec/` directory exists from a previous version, meetrec moves it to the new path on first launch.
 
 ## Input device diagnostic
 

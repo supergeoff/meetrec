@@ -609,7 +609,7 @@ pub fn App() -> Element {
     let mut error = use_signal::<Option<String>>(|| None);
 
     // Transcript state polled from AudioState.
-    let mut transcript_text = use_signal(|| String::new());
+    let mut transcript_text = use_signal(String::new);
     let mut transcript_waiting = use_signal(|| false);
     let mut transcript_version_seen = use_signal(|| 0u64);
 
@@ -637,11 +637,11 @@ pub fn App() -> Element {
 
     // Participants modal
     let mut show_participants = use_signal(|| false);
-    let mut participants_text = use_signal(|| String::new());
+    let mut participants_text = use_signal(String::new);
     let mut summary_generating = use_signal(|| false);
     let mut summary_error = use_signal::<Option<String>>(|| None);
     // Transcript and MP3 path captured at stop time, used by the modal.
-    let mut pending_transcript = use_signal(|| String::new());
+    let mut pending_transcript = use_signal(String::new);
     let mut pending_mp3_path = use_signal::<Option<PathBuf>>(|| None);
 
     // Toast notification
