@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use chrono::Local;
@@ -11,6 +11,26 @@ use dioxus_desktop::{use_window, LogicalSize};
 use crate::audio::AudioController;
 use crate::config::{Config, SummaryConfig, TranscriptionConfig, UiConfig};
 use crate::devices::{list_input_devices, SYSTEM_DEFAULT_ID};
+use crate::summary::call_summary_api;
+
+#[derive(Clone, PartialEq)]
+enum Toast {
+    Simple(String),
+    Success {
+        mp3: PathBuf,
+        txt: PathBuf,
+        md: PathBuf,
+    },
+}
+
+fn open_folder_cmd(path: &std::path::Path) {
+    #[cfg(target_os = "windows")]
+    let _ = std::process::Command::new("explorer").arg(path).spawn();
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open").arg(path).spawn();
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let _ = std::process::Command::new("xdg-open").arg(path).spawn();
+}
 
 const STYLE: &str = r#"
 @import url("https://cdn.jsdelivr.net/fontsource/fonts/red-hat-text:vf@latest/latin-wght-normal.css");
@@ -481,6 +501,84 @@ html, body {
                 color var(--dur-fast) var(--ease-out);
 }
 .chevron-btn:hover { background: var(--ink-10); color: var(--ink); }
+
+/* ── participants modal spinner / generating hint ── */
+.generating-hint {
+    font-size: 11px;
+    color: var(--fg-muted);
+    text-align: center;
+    padding: 4px 0;
+    font-style: italic;
+}
+
+/* ── toast notification (bottom-center) ── */
+.toast {
+    position: fixed;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--ink);
+    color: var(--paper);
+    border-radius: var(--r-md);
+    padding: 12px 16px;
+    min-width: 280px;
+    max-width: 520px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+    z-index: 200;
+    font-size: 12px;
+}
+.toast-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+}
+.toast-message {
+    line-height: 1.5;
+    flex: 1;
+}
+.toast-close {
+    background: none;
+    border: none;
+    color: rgba(255,255,255,0.6);
+    font-size: 14px;
+    cursor: pointer;
+    padding: 0 2px;
+    border-radius: var(--r-sm);
+    line-height: 1;
+    flex-shrink: 0;
+}
+.toast-close:hover { color: var(--paper); }
+.toast-paths {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    opacity: 0.75;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    overflow-wrap: anywhere;
+}
+.toast-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+.btn-folder {
+    background: rgba(255,255,255,0.12);
+    color: var(--paper);
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: var(--r-pill);
+    padding: 4px 14px;
+    font-family: var(--font-sans);
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background var(--dur-fast) var(--ease-out);
+}
+.btn-folder:hover { background: rgba(255,255,255,0.22); }
 "#;
 
 #[component]
@@ -532,6 +630,22 @@ pub fn App() -> Element {
     let mut show_settings = use_signal(|| false);
     let mut settings_tab = use_signal(|| 0u8);
     let mut modal_error = use_signal::<Option<String>>(|| None);
+
+    // ── Stop sequence ──────────────────────────────────────────────────────
+    // MP3 path for the current recording session (set at record start).
+    let mut session_mp3_path = use_signal::<Option<PathBuf>>(|| None);
+
+    // Participants modal
+    let mut show_participants = use_signal(|| false);
+    let mut participants_text = use_signal(|| String::new());
+    let mut summary_generating = use_signal(|| false);
+    let mut summary_error = use_signal::<Option<String>>(|| None);
+    // Transcript and MP3 path captured at stop time, used by the modal.
+    let mut pending_transcript = use_signal(|| String::new());
+    let mut pending_mp3_path = use_signal::<Option<PathBuf>>(|| None);
+
+    // Toast notification
+    let mut toast = use_signal::<Option<Toast>>(|| None);
 
     // Draft signals — initialized from saved values when the modal opens.
     let mut d_t_enabled = use_signal(|| initial.transcription.enabled);
@@ -661,6 +775,7 @@ pub fn App() -> Element {
 
             let stamp = Local::now().format("%Y%m%d_%H%M%S").to_string();
             let path = folder.join(format!("meeting_{}.mp3", stamp));
+            session_mp3_path.set(Some(path.clone()));
             let device = selected_device.read().clone();
             let tc = if transcription.enabled { Some(transcription) } else { None };
             controller.start(device, path, tc);
@@ -678,8 +793,29 @@ pub fn App() -> Element {
     let stop_recording = {
         let controller = Arc::clone(&controller);
         move |_| {
+            // Capture session state before stopping.
+            let transcript = transcript_text.peek().clone();
+            let was_tc_enabled = session_transcription.peek().is_some();
+            let mp3 = session_mp3_path.peek().clone();
+
             controller.stop();
             session_transcription.set(None);
+
+            let is_empty = transcript.trim().is_empty();
+            if !was_tc_enabled {
+                toast.set(Some(Toast::Simple("Enregistrement terminé".to_string())));
+            } else if is_empty {
+                toast.set(Some(Toast::Simple(
+                    "Pas de transcript disponible pour le résumé".to_string(),
+                )));
+            } else {
+                pending_transcript.set(transcript);
+                pending_mp3_path.set(mp3);
+                participants_text.set(String::new());
+                summary_error.set(None);
+                summary_generating.set(false);
+                show_participants.set(true);
+            }
         }
     };
 
@@ -691,6 +827,66 @@ pub fn App() -> Element {
             saved_ui_cfg.set(UiConfig { transcription_panel_expanded: new_val });
             let w: f64 = if new_val { 860.0 } else { 580.0 };
             window.set_inner_size(LogicalSize::new(w, 240.0_f64));
+        }
+    };
+
+    // ── summary generation handler ───────────────────────────────────────
+    let generate_summary = move |_| {
+        let participants = participants_text.peek().clone();
+        let transcript = pending_transcript.peek().clone();
+        let config = saved_summary.peek().clone();
+        let mp3 = pending_mp3_path.peek().clone().unwrap_or_default();
+
+        summary_generating.set(true);
+        summary_error.set(None);
+
+        // Run the blocking HTTP call on a separate thread; poll result async.
+        let cell: Arc<Mutex<Option<Result<String, String>>>> = Arc::new(Mutex::new(None));
+        let cell_t = Arc::clone(&cell);
+
+        std::thread::spawn(move || {
+            let result = call_summary_api(&config, &transcript, &participants)
+                .map_err(|e| e.to_string());
+            *cell_t.lock().unwrap() = Some(result);
+        });
+
+        spawn(async move {
+            loop {
+                futures_timer::Delay::new(Duration::from_millis(200)).await;
+                if let Some(result) = cell.lock().unwrap().take() {
+                    match result {
+                        Ok(markdown) => {
+                            let md_path = mp3.with_extension("md");
+                            let txt_path = mp3.with_extension("txt");
+                            if let Err(e) = std::fs::write(&md_path, &markdown) {
+                                summary_error
+                                    .set(Some(format!("Erreur d'écriture du .md : {e}")));
+                            } else {
+                                show_participants.set(false);
+                                toast.set(Some(Toast::Success {
+                                    mp3: mp3.clone(),
+                                    txt: txt_path,
+                                    md: md_path,
+                                }));
+                            }
+                        }
+                        Err(e) => {
+                            summary_error.set(Some(e));
+                        }
+                    }
+                    summary_generating.set(false);
+                    break;
+                }
+            }
+        });
+    };
+
+    let close_toast = move |_| toast.set(None);
+    let open_folder = move |_| {
+        if let Some(Toast::Success { mp3, .. }) = toast.peek().clone() {
+            if let Some(parent) = mp3.parent() {
+                open_folder_cmd(parent);
+            }
         }
     };
 
@@ -964,6 +1160,65 @@ pub fn App() -> Element {
             if panel_expanded { "‹" } else { "›" }
         }
 
+        // ── participants modal ────────────────────────────────────
+        if *show_participants.read() {
+            div { class: "modal-backdrop",
+                div { class: "modal",
+                    div { class: "modal-header",
+                        span { class: "modal-title", "Participants" }
+                    }
+                    div { class: "modal-body",
+                        div { class: "form-row",
+                            span { class: "form-label", "Participants" }
+                            textarea {
+                                class: "form-input form-textarea",
+                                placeholder: "Un participant par ligne, ou format libre…",
+                                value: "{participants_text}",
+                                disabled: *summary_generating.read(),
+                                oninput: move |e| { participants_text.set(e.value()); },
+                            }
+                            span { class: "form-hint",
+                                "Laissez vide si les participants ne sont pas connus."
+                            }
+                        }
+                        if *summary_generating.read() {
+                            div { class: "generating-hint", "Génération du résumé en cours…" }
+                        }
+                        if let Some(err) = summary_error.read().clone() {
+                            div { class: "modal-err", "{err}" }
+                        }
+                    }
+                    div { class: "modal-footer",
+                        button {
+                            class: "btn btn-ghost",
+                            disabled: *summary_generating.read(),
+                            onclick: move |_| { show_participants.set(false); },
+                            "Annuler"
+                        }
+                        if *summary_generating.read() {
+                            button {
+                                class: "btn btn-primary",
+                                disabled: true,
+                                "Génération…"
+                            }
+                        } else if summary_error.read().is_some() {
+                            button {
+                                class: "btn btn-primary",
+                                onclick: generate_summary,
+                                "Réessayer"
+                            }
+                        } else {
+                            button {
+                                class: "btn btn-primary",
+                                onclick: generate_summary,
+                                "Générer le résumé"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // ── settings modal ────────────────────────────────────────
         if *show_settings.read() {
             div { class: "modal-backdrop",
@@ -1143,6 +1398,39 @@ pub fn App() -> Element {
                             class: "btn btn-primary",
                             onclick: save_settings,
                             "Enregistrer"
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── toast notification ────────────────────────────────────
+        if let Some(t) = toast.read().clone() {
+            div { class: "toast",
+                div { class: "toast-header",
+                    div { class: "toast-message",
+                        match &t {
+                            Toast::Simple(msg) => rsx! { "{msg}" },
+                            Toast::Success { .. } => rsx! { "Résumé généré avec succès !" },
+                        }
+                    }
+                    button {
+                        class: "toast-close",
+                        onclick: close_toast,
+                        "✕"
+                    }
+                }
+                if let Toast::Success { mp3, txt, md } = &t {
+                    div { class: "toast-paths",
+                        span { "{mp3.display()}" }
+                        span { "{txt.display()}" }
+                        span { "{md.display()}" }
+                    }
+                    div { class: "toast-actions",
+                        button {
+                            class: "btn-folder",
+                            onclick: open_folder,
+                            "Ouvrir le dossier"
                         }
                     }
                 }
