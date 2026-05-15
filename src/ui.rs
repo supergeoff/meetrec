@@ -11,12 +11,17 @@ use dioxus_desktop::{use_window, LogicalSize};
 use crate::audio::AudioController;
 use crate::config::{Config, SummaryConfig, TranscriptionConfig, UiConfig};
 use crate::devices::{list_input_devices, SYSTEM_DEFAULT_ID};
-use crate::summary::call_summary_api;
+use crate::summary::{call_summary_api, ParsedSummary};
 
 #[derive(Clone, PartialEq)]
 enum Toast {
     Simple(String),
     Success {
+        mp3: PathBuf,
+        txt: PathBuf,
+        md: PathBuf,
+    },
+    Degraded {
         mp3: PathBuf,
         txt: PathBuf,
         md: PathBuf,
@@ -841,7 +846,8 @@ pub fn App() -> Element {
         summary_error.set(None);
 
         // Run the blocking HTTP call on a separate thread; poll result async.
-        let cell: Arc<Mutex<Option<Result<String, String>>>> = Arc::new(Mutex::new(None));
+        let cell: Arc<Mutex<Option<Result<ParsedSummary, String>>>> =
+            Arc::new(Mutex::new(None));
         let cell_t = Arc::clone(&cell);
 
         std::thread::spawn(move || {
@@ -855,7 +861,9 @@ pub fn App() -> Element {
                 futures_timer::Delay::new(Duration::from_millis(200)).await;
                 if let Some(result) = cell.lock().unwrap().take() {
                     match result {
-                        Ok(markdown) => {
+                        Ok(parsed) => {
+                            let degraded = parsed.is_degraded();
+                            let markdown = parsed.into_markdown();
                             let md_path = mp3.with_extension("md");
                             let txt_path = mp3.with_extension("txt");
                             if let Err(e) = std::fs::write(&md_path, &markdown) {
@@ -863,11 +871,19 @@ pub fn App() -> Element {
                                     .set(Some(format!("Erreur d'écriture du .md : {e}")));
                             } else {
                                 show_participants.set(false);
-                                toast.set(Some(Toast::Success {
-                                    mp3: mp3.clone(),
-                                    txt: txt_path,
-                                    md: md_path,
-                                }));
+                                if degraded {
+                                    toast.set(Some(Toast::Degraded {
+                                        mp3: mp3.clone(),
+                                        txt: txt_path,
+                                        md: md_path,
+                                    }));
+                                } else {
+                                    toast.set(Some(Toast::Success {
+                                        mp3: mp3.clone(),
+                                        txt: txt_path,
+                                        md: md_path,
+                                    }));
+                                }
                             }
                         }
                         Err(e) => {
@@ -883,10 +899,12 @@ pub fn App() -> Element {
 
     let close_toast = move |_| toast.set(None);
     let open_folder = move |_| {
-        if let Some(Toast::Success { mp3, .. }) = toast.peek().clone() {
-            if let Some(parent) = mp3.parent() {
-                open_folder_cmd(parent);
-            }
+        let mp3 = match toast.peek().clone() {
+            Some(Toast::Success { mp3, .. }) | Some(Toast::Degraded { mp3, .. }) => mp3,
+            _ => return,
+        };
+        if let Some(parent) = mp3.parent() {
+            open_folder_cmd(parent);
         }
     };
 
@@ -1412,6 +1430,9 @@ pub fn App() -> Element {
                         match &t {
                             Toast::Simple(msg) => rsx! { "{msg}" },
                             Toast::Success { .. } => rsx! { "Résumé généré avec succès !" },
+                            Toast::Degraded { .. } => rsx! {
+                                "Modèle n'a pas honoré tool_choice — résumé sauvé en mode dégradé"
+                            },
                         }
                     }
                     button {
@@ -1420,7 +1441,7 @@ pub fn App() -> Element {
                         "✕"
                     }
                 }
-                if let Toast::Success { mp3, txt, md } = &t {
+                if let Toast::Success { mp3, txt, md } | Toast::Degraded { mp3, txt, md } = &t {
                     div { class: "toast-paths",
                         span { "{mp3.display()}" }
                         span { "{txt.display()}" }
