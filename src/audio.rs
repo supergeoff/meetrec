@@ -358,6 +358,7 @@ fn start_session(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_stream<E>(
     device: &cpal::Device,
     config: &StreamConfig,
