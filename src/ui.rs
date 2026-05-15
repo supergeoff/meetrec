@@ -357,10 +357,12 @@ html, body {
 .form-input:disabled { opacity: 0.45; cursor: default; }
 .form-textarea {
     resize: vertical;
-    min-height: 90px;
+    min-height: 200px;
     font-family: var(--font-mono);
     font-size: 11px;
     line-height: 1.5;
+    white-space: pre-wrap;
+    tab-size: 2;
 }
 .form-hint { font-size: 10px; color: var(--fg-faint); font-family: var(--font-mono); }
 .form-check-row {

@@ -296,4 +296,20 @@ input_device = "default"
         assert!(text.starts_with("# WARNING:"));
         assert!(text.contains("plain text"));
     }
+
+    #[test]
+    fn prompt_template_roundtrip_preserves_newlines_and_indentation() {
+        let template = "### Section titre\n  - sous-puce avec 2 espaces\n  - autre sous-puce\n\nLigne vide ci-dessus.";
+        let mut cfg = Config::default();
+        cfg.summary.prompt_template = template.to_string();
+
+        let toml_text = toml::to_string_pretty(&cfg).unwrap();
+        let loaded: Config = toml::from_str(&toml_text).unwrap();
+
+        assert_eq!(
+            loaded.summary.prompt_template,
+            template,
+            "prompt_template must be byte-equal after TOML roundtrip"
+        );
+    }
 }
