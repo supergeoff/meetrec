@@ -27,16 +27,16 @@ fn main() {
     let icon = load_icon();
 
     let initial_cfg = Config::load();
-    let initial_width: f64 = if initial_cfg.ui.transcription_panel_expanded {
-        860.0
+    let initial_height: f64 = if initial_cfg.ui.transcription_panel_expanded {
+        440.0
     } else {
-        580.0
+        240.0
     };
 
     let window = WindowBuilder::new()
         .with_title("meetrec")
-        .with_inner_size(LogicalSize::new(initial_width, 240.0))
-        .with_min_inner_size(LogicalSize::new(500.0, 220.0))
+        .with_inner_size(LogicalSize::new(580.0, initial_height))
+        .with_min_inner_size(LogicalSize::new(500.0, 200.0))
         .with_resizable(true)
         .with_window_icon(icon);
 

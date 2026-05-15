@@ -76,12 +76,10 @@ html, body {
 }
 
 .app {
-    display: grid;
-    grid-template-columns: 220px 1fr;
-    gap: 18px;
-    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
     height: 100%;
-    align-items: stretch;
+    overflow: hidden;
 }
 
 /* ── left column: controls + timer + vumeter ── */
@@ -411,20 +409,37 @@ html, body {
 .btn-primary:hover { opacity: 0.85; }
 .modal-err { font-size: 11px; color: #c00; }
 
-/* ── app grid with expanded transcript panel ── */
-.app.panel-open {
-    grid-template-columns: 220px 1fr 260px;
+/* ── main content row ── */
+.main-row {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 18px;
+    padding: 12px 18px;
+    flex: 1;
+    align-items: stretch;
+    min-height: 0;
+}
+
+/* ── app header bar ── */
+.app-header {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 4px 12px;
+    border-bottom: 1px solid var(--hairline);
+    flex-shrink: 0;
 }
 
 /* ── transcript panel ── */
 .panel {
     display: flex;
     flex-direction: column;
-    border-left: 1px solid var(--hairline);
-    padding: 10px 12px 10px 14px;
+    border-top: 1px solid var(--hairline);
+    padding: 10px 18px;
     overflow: hidden;
     gap: 6px;
-    min-width: 0;
+    height: 180px;
+    flex-shrink: 0;
 }
 .panel-hdr {
     font-size: 9px;
@@ -477,6 +492,19 @@ html, body {
 }
 .btn-setup:hover { background: var(--ink-05); }
 
+/* ── inline preferences text link ── */
+.link-setup {
+    background: none;
+    border: none;
+    color: var(--ink-50);
+    font-size: 11px;
+    font-family: var(--font-sans);
+    cursor: pointer;
+    text-decoration: underline;
+    padding: 2px 0;
+}
+.link-setup:hover { color: var(--ink); }
+
 /* ── record-blocked hint below controls ── */
 .rec-blocked-hint {
     font-size: 10px;
@@ -486,22 +514,18 @@ html, body {
     max-width: 160px;
 }
 
-/* ── chevron toggle button (fixed right edge) ── */
+/* ── chevron toggle button (bottom strip) ── */
 .chevron-btn {
-    position: fixed;
-    right: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    background: var(--ink-05);
     border: none;
-    border-left: 1px solid var(--hairline);
-    border-radius: var(--r-sm) 0 0 var(--r-sm);
+    border-top: 1px solid var(--hairline);
+    background: var(--ink-05);
     color: var(--fg-muted);
-    font-size: 12px;
+    font-size: 11px;
     line-height: 1;
-    padding: 10px 3px;
+    padding: 3px 0;
     cursor: pointer;
-    z-index: 10;
+    flex-shrink: 0;
+    text-align: center;
     transition: background var(--dur-fast) var(--ease-out),
                 color var(--dur-fast) var(--ease-out);
 }
@@ -830,8 +854,8 @@ pub fn App() -> Element {
         move |_| {
             let new_val = !saved_ui_cfg.read().transcription_panel_expanded;
             saved_ui_cfg.set(UiConfig { transcription_panel_expanded: new_val });
-            let w: f64 = if new_val { 860.0 } else { 580.0 };
-            window.set_inner_size(LogicalSize::new(w, 240.0_f64));
+            let h: f64 = if new_val { 440.0 } else { 240.0 };
+            window.set_inner_size(LogicalSize::new(580.0_f64, h));
         }
     };
 
@@ -1011,125 +1035,133 @@ pub fn App() -> Element {
 
     rsx! {
         style { {STYLE} }
-        div { class: if panel_expanded { "app panel-open" } else { "app" },
+        div { class: "app",
 
-// ── left column: transport ────────────────────────────
-            div { class: "left",
-                div { class: "controls",
-                    if !recording_now {
-                        button {
-                            class: "ctl",
-                            title: if transcription_unconfigured { "Transcription non configurée" } else { "Record" },
-                            disabled: transcription_unconfigured,
-                            onclick: start_recording,
-                            span { class: "circle" }
-                        }
-                    } else {
-                        if paused_now {
+            // ── header bar: persistent ⚙ button ──────────────────────
+            div { class: "app-header",
+                button {
+                    class: "settings-btn",
+                    title: "Préférences",
+                    onclick: open_settings,
+                    "⚙ Préférences"
+                }
+            }
+
+            // ── main content row ───────────────────────────────
+            div { class: "main-row",
+
+// ── left column: transport ────────────────────────
+                div { class: "left",
+                    div { class: "controls",
+                        if !recording_now {
                             button {
                                 class: "ctl",
-                                title: "Resume",
-                                onclick: resume_recording,
-                                span { class: "tri" }
-                            }
-                        } else {
-                            button {
-                                class: "ctl rec",
-                                title: "Recording",
-                                disabled: true,
+                                title: if transcription_unconfigured { "Transcription non configurée" } else { "Record" },
+                                disabled: transcription_unconfigured,
+                                onclick: start_recording,
                                 span { class: "circle" }
                             }
+                        } else {
+                            if paused_now {
+                                button {
+                                    class: "ctl",
+                                    title: "Resume",
+                                    onclick: resume_recording,
+                                    span { class: "tri" }
+                                }
+                            } else {
+                                button {
+                                    class: "ctl rec",
+                                    title: "Recording",
+                                    disabled: true,
+                                    span { class: "circle" }
+                                }
+                                button {
+                                    class: "ctl",
+                                    title: "Pause",
+                                    onclick: pause_recording,
+                                    span { class: "pause-bars",
+                                        span {}
+                                        span {}
+                                    }
+                                }
+                            }
                             button {
                                 class: "ctl",
-                                title: "Pause",
-                                onclick: pause_recording,
-                                span { class: "pause-bars",
-                                    span {}
-                                    span {}
+                                title: "Stop",
+                                onclick: stop_recording,
+                                span { class: "square" }
+                            }
+                        }
+                    }
+
+                    div { class: "timer", "{timer_text}" }
+
+                    div { class: "vumeter",
+                        div {
+                            class: "vu-bar",
+                            style: "width: {meter_pct}%;",
+                        }
+                    }
+
+                    if transcription_unconfigured {
+                        div { class: "rec-blocked-hint",
+                            "Transcription activée sans clé API"
+                            button {
+                                class: "link-setup",
+                                onclick: configure_tc_hint,
+                                "Ouvrir les préférences →"
+                            }
+                        }
+                    }
+                }
+
+                // ── right column: settings ────────────────────
+                div { class: "right",
+                    div { class: "row",
+                        label { "Output folder" }
+                        input {
+                            class: "input",
+                            r#type: "text",
+                            value: "{folder_str}",
+                            oninput: on_folder_input,
+                        }
+                        button {
+                            class: "browse",
+                            onclick: on_browse,
+                            "Browse…"
+                        }
+                    }
+
+                    div { class: "row",
+                        label { "Input device" }
+                        select {
+                            class: "select",
+                            value: "{device_value}",
+                            onchange: on_device_change,
+                            for entry in devices.read().iter() {
+                                option {
+                                    value: "{entry.id}",
+                                    selected: entry.id == device_value,
+                                    "{entry.label}"
                                 }
                             }
                         }
-                        button {
-                            class: "ctl",
-                            title: "Stop",
-                            onclick: stop_recording,
-                            span { class: "square" }
-                        }
                     }
-                }
 
-                div { class: "timer", "{timer_text}" }
-
-                div { class: "vumeter",
-                    div {
-                        class: "vu-bar",
-                        style: "width: {meter_pct}%;",
-                    }
-                }
-            }
-
-            // ── right column: settings ────────────────────────────
-            div { class: "right",
-                div { class: "row",
-                    label { "Output folder" }
-                    input {
-                        class: "input",
-                        r#type: "text",
-                        value: "{folder_str}",
-                        oninput: on_folder_input,
-                    }
-                    button {
-                        class: "browse",
-                        onclick: on_browse,
-                        "Browse…"
-                    }
-                }
-
-                div { class: "row",
-                    label { "Input device" }
-                    select {
-                        class: "select",
-                        value: "{device_value}",
-                        onchange: on_device_change,
-                        for entry in devices.read().iter() {
-                            option {
-                                value: "{entry.id}",
-                                selected: entry.id == device_value,
-                                "{entry.label}"
+                    div { class: "footer-row",
+                        div { class: "footer-left",
+                            if let Some(msg) = error.read().clone() {
+                                div { class: "error", "{msg}" }
+                            } else {
+                                div { class: "footer", "mono · 32 kbps · 16 kHz" }
                             }
                         }
                     }
                 }
-
-                div { class: "footer-row",
-                    div { class: "footer-left",
-                        if let Some(msg) = error.read().clone() {
-                            div { class: "error", "{msg}" }
-                        } else {
-                            div { class: "footer", "mono · 32 kbps · 16 kHz" }
-                        }
-                    }
-                    button {
-                        class: "settings-btn",
-                        title: "Paramètres",
-                        onclick: open_settings,
-                        "⚙"
-                    }
-                }
             }
 
-            if transcription_unconfigured {
-                div { class: "rec-blocked-hint",
-                    "Transcription activée sans clé API"
-                    button {
-                        class: "btn-setup",
-                        style: "display: block; margin-top: 4px;",
-                        onclick: configure_tc_hint,
-                        "⚙ Configurer"
-                    }
-                }
-            }
-            // ── transcript panel (third column, only when expanded) ──
+            // ── transcript panel (full width, below main row) ──
             if panel_expanded {
                 div { class: "panel",
                     div { class: "panel-hdr", "Transcription" }
@@ -1138,18 +1170,18 @@ pub fn App() -> Element {
                             div { class: "panel-notice",
                                 "Clé API manquante — l'enregistrement est désactivé."
                                 button {
-                                    class: "btn-setup",
+                                    class: "link-setup",
                                     onclick: configure_tc_panel,
-                                    "⚙ Configurer la transcription"
+                                    "Ouvrir les préférences →"
                                 }
                             }
                         } else if !saved_transcription.read().enabled {
                             div { class: "panel-notice",
                                 "Transcription désactivée."
                                 button {
-                                    class: "btn-setup",
+                                    class: "link-setup",
                                     onclick: configure_tc_panel,
-                                    "⚙ Activer dans les paramètres"
+                                    "Ouvrir les préférences →"
                                 }
                             }
                         } else if recording_now {
@@ -1168,14 +1200,14 @@ pub fn App() -> Element {
                     }
                 }
             }
-        }
 
-        // ── chevron toggle (fixed right edge) ────────────────────
-        button {
-            class: "chevron-btn",
-            title: if panel_expanded { "Réduire le panel" } else { "Afficher la transcription" },
-            onclick: toggle_panel,
-            if panel_expanded { "‹" } else { "›" }
+            // ── chevron toggle (bottom strip) ─────────────────────
+            button {
+                class: "chevron-btn",
+                title: if panel_expanded { "Réduire le panel" } else { "Afficher la transcription" },
+                onclick: toggle_panel,
+                if panel_expanded { "▴" } else { "▾" }
+            }
         }
 
         // ── participants modal ────────────────────────────────────
