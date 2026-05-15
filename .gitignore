@@ -1,7 +1,6 @@
 /target
 /dist
 /.claude/
-/.design-extracted/
 **/*.rs.bk
 Cargo.lock
 .DS_Store
